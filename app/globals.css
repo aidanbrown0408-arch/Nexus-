@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Plain light background for the whole app. Indigo is the one accent
+   color used for buttons and links (Tailwind's built-in indigo-*). */
+body {
+  background: #fafafa;
+  color: #171717;
+}
