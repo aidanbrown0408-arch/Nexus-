@@ -19,9 +19,10 @@ export function getOAuthClient(): OAuth2Client {
 }
 
 // Load the user's stored tokens and return an OAuth2 client already
-// pointed at them. The googleapis library refreshes the access token on
-// its own when needed; we listen for that and persist the new one so we
-// don't burn the refresh token on every call.
+// pointed at them. We force a refresh up front (rather than relying on
+// the client's 'tokens' event) and await the Supabase write ourselves,
+// so the persist finishes inside this request instead of racing a
+// serverless function freeze after the response is sent.
 export async function getAuthorizedClientForUser(
   userId: string
 ): Promise<OAuth2Client | null> {
@@ -45,17 +46,20 @@ export async function getAuthorizedClientForUser(
     scope: data.scope ?? undefined,
   });
 
-  client.on("tokens", async (tokens) => {
+  await client.getAccessToken();
+  const credentials = client.credentials;
+
+  if (credentials.access_token && credentials.access_token !== data.access_token) {
     const update: Partial<GmailTokenRow> = {
       updated_at: new Date().toISOString(),
+      access_token: credentials.access_token,
     };
-    if (tokens.access_token) update.access_token = tokens.access_token;
-    if (tokens.refresh_token) update.refresh_token = tokens.refresh_token;
-    if (tokens.expiry_date)
-      update.token_expiry = new Date(tokens.expiry_date).toISOString();
-    if (tokens.scope) update.scope = tokens.scope;
+    if (credentials.refresh_token) update.refresh_token = credentials.refresh_token;
+    if (credentials.expiry_date)
+      update.token_expiry = new Date(credentials.expiry_date).toISOString();
+    if (credentials.scope) update.scope = credentials.scope;
     await supabase.from("gmail_tokens").update(update).eq("user_id", userId);
-  });
+  }
 
   return client;
 }
