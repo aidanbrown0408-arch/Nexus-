@@ -13,7 +13,7 @@ export async function POST() {
   try {
     const supabase = getSupabaseAdmin();
     const { error } = await supabase
-      .from("gmail_tokens")
+      .from("google_tokens")
       .delete()
       .eq("user_id", userId);
     if (error) throw error;

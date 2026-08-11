@@ -15,7 +15,7 @@ function dashboardUrl(req: NextRequest, params: Record<string, string> = {}) {
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.redirect(dashboardUrl(req, { gmail: "unauthorized" }));
+    return NextResponse.redirect(dashboardUrl(req, { google: "unauthorized" }));
   }
 
   const code = req.nextUrl.searchParams.get("code");
@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
   const errorParam = req.nextUrl.searchParams.get("error");
 
   if (errorParam) {
-    return NextResponse.redirect(dashboardUrl(req, { gmail: "denied" }));
+    return NextResponse.redirect(dashboardUrl(req, { google: "denied" }));
   }
   if (!code || state !== userId) {
-    return NextResponse.redirect(dashboardUrl(req, { gmail: "error" }));
+    return NextResponse.redirect(dashboardUrl(req, { google: "error" }));
   }
 
   try {
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     const { tokens } = await client.getToken(code);
 
     const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from("gmail_tokens").upsert(
+    const { error } = await supabase.from("google_tokens").upsert(
       {
         user_id: userId,
         access_token: tokens.access_token ?? "",
@@ -49,9 +49,9 @@ export async function GET(req: NextRequest) {
     );
     if (error) throw error;
 
-    return NextResponse.redirect(dashboardUrl(req, { gmail: "connected" }));
+    return NextResponse.redirect(dashboardUrl(req, { google: "connected" }));
   } catch (err) {
     console.error("Gmail OAuth callback failed", err);
-    return NextResponse.redirect(dashboardUrl(req, { gmail: "error" }));
+    return NextResponse.redirect(dashboardUrl(req, { google: "error" }));
   }
 }

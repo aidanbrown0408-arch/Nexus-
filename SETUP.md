@@ -1,7 +1,11 @@
-# Gmail integration setup
+# Google integration setup
 
 Follow these steps once before running the app. Both Supabase and Google
 Cloud Console need a bit of configuration.
+
+Google tokens live in one `google_tokens` table and are shared by every
+Google API the app talks to (Gmail today, more later), so this setup is
+done once rather than per-API.
 
 ## 1. Supabase
 
@@ -11,7 +15,7 @@ Open your Supabase project → **SQL Editor** → **New query**, paste the
 following, and run it:
 
 ```sql
-create table if not exists public.gmail_tokens (
+create table if not exists public.google_tokens (
   user_id       text primary key,
   access_token  text not null,
   refresh_token text,
@@ -21,7 +25,7 @@ create table if not exists public.gmail_tokens (
   updated_at    timestamptz not null default now()
 );
 
-alter table public.gmail_tokens enable row level security;
+alter table public.google_tokens enable row level security;
 
 -- We authenticate with Clerk, not Supabase Auth, and only ever touch this
 -- table from server routes using the service role key. RLS is enabled so
@@ -29,7 +33,19 @@ alter table public.gmail_tokens enable row level security;
 -- service role key bypasses RLS on purpose.
 ```
 
-`user_id` stores the Clerk user id (e.g. `user_2abc...`).
+`user_id` stores the Clerk user id (e.g. `user_2abc...`) — it is `text`,
+not `uuid`, because Clerk ids are prefixed strings.
+
+### 1a-bis. Already have a `gmail_tokens` table?
+
+If you set this project up before the table was generalized, rename it
+in place rather than recreating it — this preserves existing rows, so
+connected users stay connected:
+
+```sql
+alter table public.gmail_tokens rename to google_tokens;
+alter table public.google_tokens enable row level security;
+```
 
 ### 1b. Grab the environment variables
 
@@ -73,9 +89,9 @@ project or create a new one (top-left project dropdown → **New project**).
   - `http://localhost:3000`
   - (add your production origin later, e.g. `https://your-domain.com`)
 - **Authorized redirect URIs**:
-  - `http://localhost:3000/api/gmail/callback`
+  - `http://localhost:3000/api/google/callback`
   - (add the production equivalent later, e.g.
-    `https://your-domain.com/api/gmail/callback`)
+    `https://your-domain.com/api/google/callback`)
 - Create. Copy the **Client ID** and **Client secret**.
 
 ## 3. Environment variables
@@ -91,11 +107,15 @@ SUPABASE_SERVICE_ROLE_KEY=...         # from step 1b (server-only)
 # Google OAuth
 GOOGLE_CLIENT_ID=...                  # from step 2d
 GOOGLE_CLIENT_SECRET=...              # from step 2d
-GOOGLE_REDIRECT_URI=http://localhost:3000/api/gmail/callback
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/google/callback
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
+
+`GOOGLE_REDIRECT_URI` must match one of the Authorized redirect URIs on
+the OAuth client exactly, path included. Google rejects the connect flow
+with `redirect_uri_mismatch` otherwise.
 
 Restart the dev server after editing `.env.local`.
 

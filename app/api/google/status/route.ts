@@ -13,7 +13,7 @@ export async function GET() {
   try {
     const supabase = getSupabaseAdmin();
     const { data, error } = await supabase
-      .from("gmail_tokens")
+      .from("google_tokens")
       .select("user_id")
       .eq("user_id", userId)
       .maybeSingle();

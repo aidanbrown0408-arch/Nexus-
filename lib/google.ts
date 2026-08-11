@@ -1,8 +1,11 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
-import { getSupabaseAdmin, type GmailTokenRow } from "./supabase";
+import { getSupabaseAdmin, type GoogleTokenRow } from "./supabase";
 
-export const GMAIL_SCOPES = [
+// Every Google scope the app asks for at connect time. Gmail-only for
+// now; Calendar and friends get appended here rather than in a
+// per-API list.
+export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
 ];
 
@@ -28,7 +31,7 @@ export async function getAuthorizedClientForUser(
 ): Promise<OAuth2Client | null> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
-    .from("gmail_tokens")
+    .from("google_tokens")
     .select("access_token, refresh_token, token_expiry, scope")
     .eq("user_id", userId)
     .maybeSingle();
@@ -50,7 +53,7 @@ export async function getAuthorizedClientForUser(
   const credentials = client.credentials;
 
   if (credentials.access_token && credentials.access_token !== data.access_token) {
-    const update: Partial<GmailTokenRow> = {
+    const update: Partial<GoogleTokenRow> = {
       updated_at: new Date().toISOString(),
       access_token: credentials.access_token,
     };
@@ -58,7 +61,7 @@ export async function getAuthorizedClientForUser(
     if (credentials.expiry_date)
       update.token_expiry = new Date(credentials.expiry_date).toISOString();
     if (credentials.scope) update.scope = credentials.scope;
-    await supabase.from("gmail_tokens").update(update).eq("user_id", userId);
+    await supabase.from("google_tokens").update(update).eq("user_id", userId);
   }
 
   return client;

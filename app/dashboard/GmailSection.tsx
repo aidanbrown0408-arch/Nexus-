@@ -76,12 +76,12 @@ export default function GmailSection() {
     }
   }, []);
 
-  // On mount, check whether Gmail is connected and load messages if so.
+  // On mount, check whether Google is connected and load messages if so.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/gmail/status", { cache: "no-store" });
+        const res = await fetch("/api/google/status", { cache: "no-store" });
         if (!res.ok) throw new Error("status check failed");
         const body = (await res.json()) as { connected: boolean };
         if (cancelled) return;
@@ -105,9 +105,9 @@ export default function GmailSection() {
     };
   }, [fetchMessages]);
 
-  // Turn the ?gmail=... hint from the OAuth callback into a banner, then
+  // Turn the ?google=... hint from the OAuth callback into a banner, then
   // clean it out of the URL so refreshes don't re-show it.
-  const flash = searchParams.get("gmail");
+  const flash = searchParams.get("google");
   useEffect(() => {
     if (!flash) return;
     if (flash === "connected") {
@@ -115,11 +115,11 @@ export default function GmailSection() {
       fetchMessages();
     }
     const url = new URL(window.location.href);
-    url.searchParams.delete("gmail");
+    url.searchParams.delete("google");
     router.replace(url.pathname + (url.search ? url.search : ""));
   }, [flash, fetchMessages, router]);
 
-  const connectHref = "/api/gmail/connect";
+  const connectHref = "/api/google/connect";
 
   return (
     <section className="mt-8 w-full max-w-2xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">

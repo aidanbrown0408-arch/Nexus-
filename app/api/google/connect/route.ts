@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { GMAIL_SCOPES, getOAuthClient } from "@/lib/google";
+import { GOOGLE_SCOPES, getOAuthClient } from "@/lib/google";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function GET() {
     // on repeat connects — without this, the second connect from the same
     // account can come back without one.
     prompt: "consent",
-    scope: GMAIL_SCOPES,
+    scope: GOOGLE_SCOPES,
     state: userId,
     include_granted_scopes: true,
   });

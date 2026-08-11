@@ -26,7 +26,7 @@ export function getSupabaseAdmin(): SupabaseClient {
   return cached;
 }
 
-export type GmailTokenRow = {
+export type GoogleTokenRow = {
   user_id: string;
   access_token: string;
   refresh_token: string | null;
