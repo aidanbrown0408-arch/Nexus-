@@ -62,10 +62,11 @@ In Supabase → **Project Settings** → **API**, copy:
 Go to <https://console.cloud.google.com/> and either select an existing
 project or create a new one (top-left project dropdown → **New project**).
 
-### 2b. Enable the Gmail API
+### 2b. Enable the Google APIs
 
 - Navigation menu → **APIs & Services** → **Library**
 - Search for **Gmail API**, open it, click **Enable**.
+- Do the same for **Google Calendar API**.
 
 ### 2c. Configure the OAuth consent screen
 
@@ -76,6 +77,7 @@ project or create a new one (top-left project dropdown → **New project**).
   contact email. Save & continue.
 - **Scopes**: click **Add or remove scopes** and add:
   - `https://www.googleapis.com/auth/gmail.readonly`
+  - `https://www.googleapis.com/auth/calendar.readonly`
 - **Test users**: while the app is in Testing mode, add your own Google
   account (and anyone else who'll test) here. Save.
 
@@ -125,7 +127,32 @@ Restart the dev server after editing `.env.local`.
 2. Sign in, visit `/dashboard`.
 3. Click **Connect Gmail** — you'll be sent to Google, grant permission,
    and land back on the dashboard.
-4. Your 20 most recent emails should appear. Use **Refresh** to re-fetch.
+4. Your 20 most recent emails should appear, and your next 7 days of
+   events below them. Use **Refresh** on either card to re-fetch.
 
 If Google returns `access_denied`, the app will show a friendly banner
-instead of crashing. Same for any Gmail API failure at fetch time.
+instead of crashing. Same for any Gmail or Calendar API failure at fetch
+time.
+
+## 5. Re-consenting after a scope change
+
+Google grants scopes at connect time and bakes them into the stored
+token. Adding a scope to `GOOGLE_SCOPES` does **not** widen a token that
+already exists — anyone connected before the change keeps the narrower
+grant until they go through consent again.
+
+Calendar was added after Gmail, so every account connected before then
+is in exactly this position. The app detects it: `/api/calendar/events`
+checks the stored scope string before calling Google and returns
+`code: "scope_missing"`, which the dashboard renders as a **Reconnect to
+enable Calendar** prompt on the Upcoming card. The inbox keeps working
+throughout.
+
+Clicking that prompt runs the normal connect flow. `/api/google/connect`
+sends `prompt: "consent"`, so Google re-shows the permission screen
+rather than silently reissuing the old grant, and the new token comes
+back covering both scopes.
+
+The same applies to any scope added later: append it to `GOOGLE_SCOPES`,
+add it to the consent screen in step 2c, and existing users reconnect
+once.

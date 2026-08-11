@@ -2,12 +2,29 @@ import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { getSupabaseAdmin, type GoogleTokenRow } from "./supabase";
 
-// Every Google scope the app asks for at connect time. Gmail-only for
-// now; Calendar and friends get appended here rather than in a
-// per-API list.
+export const GMAIL_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/gmail.readonly";
+export const CALENDAR_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/calendar.readonly";
+
+// Every Google scope the app asks for at connect time. One consent
+// covers all of them, so new APIs get appended here rather than getting
+// a connect flow of their own.
 export const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.readonly",
+  GMAIL_READONLY_SCOPE,
+  CALENDAR_READONLY_SCOPE,
 ];
+
+// Whether a stored scope string covers a given scope. Google returns
+// the granted scopes space-separated, so match on exact members rather
+// than a substring — one scope URL can be a prefix of another.
+export function hasScope(
+  storedScope: string | null | undefined,
+  scope: string
+): boolean {
+  if (!storedScope) return false;
+  return storedScope.split(/\s+/).includes(scope);
+}
 
 export function getOAuthClient(): OAuth2Client {
   const clientId = process.env.GOOGLE_CLIENT_ID;

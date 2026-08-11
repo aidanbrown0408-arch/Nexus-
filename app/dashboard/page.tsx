@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
 import GmailSection from "./GmailSection";
+import CalendarSection from "./CalendarSection";
 
 // This page is user-specific (shows the signed-in user's name), so it
 // should never be statically prerendered at build time.
@@ -33,6 +34,8 @@ export default async function DashboardPage() {
       <Suspense fallback={null}>
         <GmailSection />
       </Suspense>
+
+      <CalendarSection />
     </main>
   );
 }

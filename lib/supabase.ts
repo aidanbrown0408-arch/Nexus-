@@ -34,3 +34,23 @@ export type GoogleTokenRow = {
   scope: string | null;
   updated_at?: string;
 };
+
+// Supabase rejects with a PostgrestError — a plain object, not an Error
+// — so String(err) on it yields "[object Object]". Pull out whatever
+// human-readable text is actually there.
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; hint?: string; code?: string };
+    const parts = [e.message, e.hint].filter(Boolean);
+    if (parts.length) {
+      return e.code ? `${parts.join(" ")} (code ${e.code})` : parts.join(" ");
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return "Unknown error";
+    }
+  }
+  return String(err);
+}
