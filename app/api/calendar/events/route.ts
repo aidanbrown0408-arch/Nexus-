@@ -1,28 +1,17 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { google } from "googleapis";
 import {
   CALENDAR_READONLY_SCOPE,
   getAuthorizedClientForUser,
   hasScope,
 } from "@/lib/google";
+import { fetchUpcomingEvents } from "@/lib/calendar";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DAYS_AHEAD = 7;
-
-type EventSummary = {
-  id: string;
-  summary: string;
-  start: string;
-  end: string;
-  allDay: boolean;
-  location: string | null;
-  attendeeCount: number;
-  hangoutLink: string | null;
-};
 
 export async function GET() {
   const { userId } = await auth();
@@ -53,43 +42,7 @@ export async function GET() {
       );
     }
 
-    const now = new Date();
-    const timeMax = new Date(now);
-    timeMax.setDate(timeMax.getDate() + DAYS_AHEAD);
-
-    const calendar = google.calendar({ version: "v3", auth: client });
-    const res = await calendar.events.list({
-      calendarId: "primary",
-      timeMin: now.toISOString(),
-      timeMax: timeMax.toISOString(),
-      // Expand recurring events into individual instances; orderBy
-      // requires it.
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 20,
-    });
-
-    const events: EventSummary[] = (res.data.items ?? [])
-      .filter((e) => e.status !== "cancelled")
-      .map((e) => {
-        // All-day events carry `date` (YYYY-MM-DD); timed events carry
-        // `dateTime`. Which one is set is the only signal for all-day.
-        const allDay = Boolean(e.start?.date);
-        const start = e.start?.dateTime ?? e.start?.date ?? "";
-        const end = e.end?.dateTime ?? e.end?.date ?? "";
-
-        return {
-          id: e.id ?? "",
-          summary: e.summary || "(no title)",
-          start,
-          end,
-          allDay,
-          location: e.location ?? null,
-          attendeeCount: e.attendees?.length ?? 0,
-          hangoutLink: e.hangoutLink ?? null,
-        };
-      })
-      .filter((e) => e.start);
+    const events = await fetchUpcomingEvents(client, DAYS_AHEAD);
 
     return NextResponse.json({ events });
   } catch (err: unknown) {

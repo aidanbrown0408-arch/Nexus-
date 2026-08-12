@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
+import BriefSection from "./BriefSection";
 import GmailSection from "./GmailSection";
 import CalendarSection from "./CalendarSection";
 
@@ -30,6 +31,8 @@ export default async function DashboardPage() {
           appearance={{ elements: { userButtonAvatarBox: "h-10 w-10" } }}
         />
       </div>
+
+      <BriefSection />
 
       <Suspense fallback={null}>
         <GmailSection />
