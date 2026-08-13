@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
 import BriefSection from "./BriefSection";
+import ChatSection from "./ChatSection";
 import GmailSection from "./GmailSection";
 import CalendarSection from "./CalendarSection";
 
@@ -33,6 +34,8 @@ export default async function DashboardPage() {
       </div>
 
       <BriefSection />
+
+      <ChatSection />
 
       <Suspense fallback={null}>
         <GmailSection />
