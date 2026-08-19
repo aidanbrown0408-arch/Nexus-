@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import DraftReply from "./DraftReply";
 
 type EmailSummary = {
   id: string;
@@ -47,6 +48,9 @@ export default function GmailSection() {
   const [messages, setMessages] = useState<EmailSummary[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
+  // Which row is expanded. One at a time — the draft panel is tall, and a
+  // list of open drafts is a worse way to read an inbox than a closed one.
+  const [openId, setOpenId] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -196,55 +200,67 @@ export default function GmailSection() {
               </p>
             ) : (
               <ul className="divide-y divide-neutral-100">
-                {messages.map((msg) => (
-                  <li key={msg.id} className="py-3">
-                    <div className="flex items-start gap-3">
-                      <span
-                        aria-hidden
-                        className={
-                          "mt-1.5 h-2 w-2 shrink-0 rounded-full " +
-                          (msg.unread ? "bg-indigo-500" : "bg-neutral-300")
-                        }
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <p
-                            className={
-                              "truncate text-sm " +
-                              (msg.unread
-                                ? "font-semibold text-neutral-900"
-                                : "font-medium text-neutral-700")
-                            }
-                            title={msg.fromEmail}
-                          >
-                            {msg.from}
-                          </p>
-                          <span className="shrink-0 text-xs text-neutral-400">
-                            {formatDate(msg.date)}
-                          </span>
-                        </div>
-                        <p
+                {messages.map((msg) => {
+                  const open = openId === msg.id;
+                  return (
+                    <li key={msg.id} className="py-3">
+                      <div className="flex items-start gap-3">
+                        <span
+                          aria-hidden
                           className={
-                            "mt-0.5 truncate text-sm " +
-                            (msg.unread
-                              ? "text-neutral-900"
-                              : "text-neutral-600")
+                            "mt-1.5 h-2 w-2 shrink-0 rounded-full " +
+                            (msg.unread ? "bg-indigo-500" : "bg-neutral-300")
                           }
-                        >
-                          {msg.subject}
-                        </p>
-                        {msg.snippet && (
-                          <p className="mt-0.5 truncate text-xs text-neutral-500">
-                            {msg.snippet}
-                          </p>
-                        )}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => setOpenId(open ? null : msg.id)}
+                            aria-expanded={open}
+                            className="w-full text-left"
+                          >
+                            <div className="flex items-baseline justify-between gap-3">
+                              <p
+                                className={
+                                  "truncate text-sm " +
+                                  (msg.unread
+                                    ? "font-semibold text-neutral-900"
+                                    : "font-medium text-neutral-700")
+                                }
+                                title={msg.fromEmail}
+                              >
+                                {msg.from}
+                              </p>
+                              <span className="shrink-0 text-xs text-neutral-400">
+                                {formatDate(msg.date)}
+                              </span>
+                            </div>
+                            <p
+                              className={
+                                "mt-0.5 truncate text-sm " +
+                                (msg.unread
+                                  ? "text-neutral-900"
+                                  : "text-neutral-600")
+                              }
+                            >
+                              {msg.subject}
+                            </p>
+                            {msg.snippet && (
+                              <p className="mt-0.5 truncate text-xs text-neutral-500">
+                                {msg.snippet}
+                              </p>
+                            )}
+                          </button>
+
+                          {open && <DraftReply messageId={msg.id} />}
+                        </div>
+                        <span className="sr-only">
+                          {msg.unread ? "Unread" : "Read"}
+                        </span>
                       </div>
-                      <span className="sr-only">
-                        {msg.unread ? "Unread" : "Read"}
-                      </span>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>
