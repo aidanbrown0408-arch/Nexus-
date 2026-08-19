@@ -6,6 +6,35 @@ export const GMAIL_READONLY_SCOPE =
   "https://www.googleapis.com/auth/gmail.readonly";
 export const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
+// Creates and updates drafts. Deliberately not gmail.send: a draft that
+// can't be sent without the user opening Gmail is the whole safety
+// argument for shipping this action first. Widening it later is a
+// decision, not an oversight.
+export const GMAIL_COMPOSE_SCOPE =
+  "https://www.googleapis.com/auth/gmail.compose";
+// Creates the native Gmail filters that route incoming mail. Settings
+// only — it can't read or move a single message on its own.
+export const GMAIL_SETTINGS_SCOPE =
+  "https://www.googleapis.com/auth/gmail.settings.basic";
+// Moves existing mail to Trash when sweeping a backlog. Still not
+// gmail.delete: everything Nexus removes lands in Trash, where Gmail
+// keeps it for 30 days and the undo route can put it back.
+export const GMAIL_MODIFY_SCOPE =
+  "https://www.googleapis.com/auth/gmail.modify";
+// Creating and deleting calendar events. The first scope that lets Nexus
+// do something other people find out about — deleting a meeting emails
+// its guests, and no undo un-sends that. The routes treat it accordingly.
+export const CALENDAR_EVENTS_SCOPE =
+  "https://www.googleapis.com/auth/calendar.events";
+// Reading saved contacts, so guests can be picked by name instead of
+// typed from memory. Read-only — Nexus never writes to the address book.
+export const CONTACTS_SCOPE =
+  "https://www.googleapis.com/auth/contacts.readonly";
+// People the user has emailed but never saved. Most of the addresses
+// anyone actually invites live here rather than in the address book, so
+// without it the picker knows far less than the user expects.
+export const OTHER_CONTACTS_SCOPE =
+  "https://www.googleapis.com/auth/contacts.other.readonly";
 
 // Every Google scope the app asks for at connect time. One consent
 // covers all of them, so new APIs get appended here rather than getting
@@ -13,6 +42,12 @@ export const CALENDAR_READONLY_SCOPE =
 export const GOOGLE_SCOPES = [
   GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
+  GMAIL_COMPOSE_SCOPE,
+  GMAIL_SETTINGS_SCOPE,
+  GMAIL_MODIFY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+  CONTACTS_SCOPE,
+  OTHER_CONTACTS_SCOPE,
 ];
 
 // Whether a stored scope string covers a given scope. Google returns

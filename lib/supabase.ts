@@ -35,6 +35,78 @@ export type GoogleTokenRow = {
   updated_at?: string;
 };
 
+// Apple has no OAuth for iCloud Calendar, so what we store is the user's
+// Apple ID plus an app-specific password they generated themselves.
+// `app_password` holds the ciphertext from lib/crypto.ts, never the raw
+// password — it doesn't expire on its own, so it can't be treated as
+// casually as a short-lived access token.
+export type AppleCredentialRow = {
+  user_id: string;
+  apple_id: string;
+  app_password: string;
+  updated_at?: string;
+};
+
+// One checklist item hanging off a calendar event. `event_key` is the
+// stable per-occurrence key from lib/events.ts, not a calendar's own id —
+// see eventKey() there for why. The event title and start are snapshots
+// taken when the item was created, so a checklist still reads sensibly
+// (and can be swept up) after the event drops out of the fetch window.
+export type PrepItemRow = {
+  id: string;
+  user_id: string;
+  event_key: string;
+  event_summary: string | null;
+  event_start: string | null;
+  title: string;
+  done: boolean;
+  origin: "claude" | "user";
+  position: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+// Records that we've already asked Claude to draft a checklist for an
+// event. Without it, an event whose suggestions the user deleted would
+// get them regenerated on the next load — and an empty checklist would
+// be indistinguishable from one never drafted.
+export type PrepStateRow = {
+  user_id: string;
+  event_key: string;
+  generated_at: string;
+};
+
+// One thing Nexus did to a user's account. `target` holds whatever the
+// undo needs — a draft id, a list of message ids — as plain string values
+// so the shape can vary by action without a migration per action type.
+// `undone_at` being null is what "still in effect" means; rows are never
+// deleted, so the history stays honest.
+export type ActionLogRow = {
+  id: string;
+  user_id: string;
+  kind:
+    | "draft_reply"
+    | "archive"
+    | "label"
+    | "filter"
+    | "trash"
+    | "event_create"
+    | "event_delete";
+  summary: string;
+  target: Record<string, string> | null;
+  undo:
+    | "delete_draft"
+    | "unarchive"
+    | "remove_label"
+    | "remove_filter"
+    | "untrash"
+    | "delete_event"
+    | "restore_event"
+    | "none";
+  undone_at: string | null;
+  created_at?: string;
+};
+
 // Supabase rejects with a PostgrestError — a plain object, not an Error
 // — so String(err) on it yields "[object Object]". Pull out whatever
 // human-readable text is actually there.
