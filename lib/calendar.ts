@@ -1,22 +1,21 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import type { EventSummary, RawEvent } from "./events";
 
-export type EventSummary = {
-  id: string;
-  summary: string;
-  start: string;
-  end: string;
-  allDay: boolean;
-  location: string | null;
-  attendeeCount: number;
-  hangoutLink: string | null;
-};
+// EventSummary lives in ./events now that Apple Calendar produces it too.
+// Re-exported here so existing imports from "@/lib/calendar" keep working.
+export type { EventSummary };
 
 // Most events a person cares about don't live on the primary calendar —
 // they're on secondary or subscribed ones (work, school, family). Querying
 // only "primary" silently drops those, so we fan out across every calendar
 // the user has switched on.
-const MAX_EVENTS = 50;
+// Matches the maxResults already asked of the API. Sized for a week, a
+// cap of 50 silently swallowed most of a 90-day window.
+const MAX_EVENTS = 250;
+// Enough to tell who a meeting is with when drafting its prep list.
+// A 200-person all-hands doesn't need every address carried around.
+const MAX_ATTENDEES = 20;
 
 // Fetch events from now through `days` ahead across all of the user's
 // visible calendars, in start order. Assumes the caller has already
@@ -26,7 +25,7 @@ const MAX_EVENTS = 50;
 export async function fetchUpcomingEvents(
   client: OAuth2Client,
   days: number
-): Promise<EventSummary[]> {
+): Promise<RawEvent[]> {
   const now = new Date();
   const timeMax = new Date(now);
   timeMax.setDate(timeMax.getDate() + days);
@@ -38,10 +37,15 @@ export async function fetchUpcomingEvents(
   // omits it entirely when off — so match on `=== true` and let the primary
   // through regardless. This keeps holiday feeds and stale subscriptions out
   // unless the user actually displays them.
-  const calendarIds = (calendarList.data.items ?? [])
-    .filter((c) => !c.deleted && (c.selected === true || c.primary === true))
-    .map((c) => c.id)
-    .filter((id): id is string => Boolean(id));
+  const visible = (calendarList.data.items ?? []).filter(
+    (c) => !c.deleted && (c.selected === true || c.primary === true) && c.id
+  );
+  const calendarIds = visible.map((c) => c.id as string);
+  // Kept alongside the ids so each event can carry the name of the
+  // calendar it came from, the way the Apple side does.
+  const calendarNames = new Map(
+    visible.map((c) => [c.id as string, c.summaryOverride ?? c.summary ?? null])
+  );
 
   const results = await Promise.allSettled(
     calendarIds.map((calendarId) =>
@@ -59,7 +63,15 @@ export async function fetchUpcomingEvents(
   );
 
   const items = results.flatMap((result, i) => {
-    if (result.status === "fulfilled") return result.value.data.items ?? [];
+    if (result.status === "fulfilled") {
+      // Carry the calendar id alongside each event — the response items
+      // don't name the calendar they came from, and the flatten below
+      // would otherwise lose it.
+      return (result.value.data.items ?? []).map((item) => ({
+        item,
+        calendarId: calendarIds[i],
+      }));
+    }
     // One unreadable calendar shouldn't cost the user every other event.
     console.error(
       `Calendar fetch failed for ${calendarIds[i]}`,
@@ -72,16 +84,16 @@ export async function fetchUpcomingEvents(
   // invite on the primary that a shared calendar also carries). Google gives
   // those copies different event ids but the same iCalUID, so dedupe on that.
   const seen = new Set<string>();
-  const unique = items.filter((e) => {
+  const unique = items.filter(({ item: e }) => {
     const key = e.iCalUID ?? e.id;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 
-  const events: EventSummary[] = unique
-    .filter((e) => e.status !== "cancelled")
-    .map((e) => {
+  const events: RawEvent[] = unique
+    .filter(({ item: e }) => e.status !== "cancelled")
+    .map(({ item: e, calendarId }) => {
       // All-day events carry `date` (YYYY-MM-DD); timed events carry
       // `dateTime`. Which one is set is the only signal for all-day.
       const allDay = Boolean(e.start?.date);
@@ -97,6 +109,15 @@ export async function fetchUpcomingEvents(
         location: e.location ?? null,
         attendeeCount: e.attendees?.length ?? 0,
         hangoutLink: e.hangoutLink ?? null,
+        source: "google" as const,
+        calendarName: calendarNames.get(calendarId) ?? null,
+        calendarId,
+        recurringEventId: e.recurringEventId ?? null,
+        uid: e.iCalUID ?? null,
+        attendees: (e.attendees ?? [])
+          .map((a) => a.email)
+          .filter((email): email is string => Boolean(email))
+          .slice(0, MAX_ATTENDEES),
       };
     })
     .filter((e) => e.start);
