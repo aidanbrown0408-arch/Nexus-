@@ -1,0 +1,35 @@
+{
+  "// why": [
+    "Tests run on Node's built-in runner against plain CommonJS, compiled",
+    "here from the same sources the app uses. No test framework is",
+    "installed on purpose: Node 22 ships `node:test` and TypeScript is",
+    "already a dependency, so the whole setup costs one config file and no",
+    "new supply chain to keep patched.",
+    "",
+    "Only lib/ is compiled. Route handlers and components need a Next.js",
+    "runtime to mean anything; the logic worth testing was deliberately",
+    "kept out of them."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2020",
+    "lib": ["es2020", "dom"],
+    "outDir": ".test-build",
+    "rootDir": ".",
+    "isolatedModules": false,
+    "jsx": "react-jsx",
+    "plugins": []
+  },
+  "// include": [
+    "next-env.d.ts comes along because Next augments RequestInit with its",
+    "`next: { revalidate }` caching option, which lib/rss.ts and",
+    "lib/markets.ts both use. Without it they fail to compile here while",
+    "compiling fine in the app."
+  ],
+  "include": ["next-env.d.ts", "lib/**/*.ts"],
+  "exclude": ["node_modules", ".next"]
+}

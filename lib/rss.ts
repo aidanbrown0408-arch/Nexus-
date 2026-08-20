@@ -96,6 +96,11 @@ function toPlainText(html: string | null): string {
       .replace(/<[^>]+>/g, " ")
   )
     .replace(/\s+/g, " ")
+    // Tags become spaces so words don't run together, which leaves a gap
+    // before punctuation wherever a link ended a sentence: "the jobs
+    // report ." Closing it here rather than not spacing at all, because
+    // "reportcame" is the worse failure.
+    .replace(/\s+([.,;:!?%])/g, "$1")
     .trim()
     .slice(0, MAX_SUMMARY_CHARS);
 }
