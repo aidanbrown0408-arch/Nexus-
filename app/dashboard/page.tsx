@@ -60,6 +60,12 @@ export default async function DashboardPage() {
             What Nexus has done
           </Link>
           <Link
+            href="/dashboard/memory"
+            className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
+          >
+            What Nexus remembers
+          </Link>
+          <Link
             href="/dashboard/settings"
             className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
           >

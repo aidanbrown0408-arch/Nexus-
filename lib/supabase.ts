@@ -104,6 +104,25 @@ export type BriefDeliveryRow = {
   sent_at?: string;
 };
 
+// One short fact Nexus inferred about the user while reading their mail
+// and calendar. `source_id` is the message id or event key it was read
+// out of and is never null — a fact with no source can't be checked, and
+// an unfalsifiable claim in a prompt is the thing this table exists to
+// avoid. `expires_at` null means "no reason to think this stops being
+// true" (who someone's co-founder is); a date means it's a deadline or
+// something else that rots.
+export type UserFactRow = {
+  id: string;
+  user_id: string;
+  category: string;
+  fact: string;
+  source_id: string;
+  source_label: string | null;
+  source_kind: string | null;
+  expires_at: string | null;
+  created_at?: string;
+};
+
 export type ActionLogRow = {
   id: string;
   user_id: string;

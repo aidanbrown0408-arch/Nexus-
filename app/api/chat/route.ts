@@ -14,6 +14,7 @@ import {
   profileToPromptContext,
   type UserProfileRow,
 } from "@/lib/profile";
+import { recallFacts, factsToPromptContext } from "@/lib/memory";
 import { nowLines, resolveTimezone } from "@/lib/clock";
 import { errorMessage } from "@/lib/supabase";
 
@@ -254,8 +255,21 @@ export async function POST(req: NextRequest) {
   try {
     const timeZone = resolveTimezone(profile?.timezone);
 
+    // What Nexus remembers, narrowed by the question itself rather than
+    // by the mailbox — "what did I promise Marcus?" should reach the note
+    // about Marcus even if he sent nothing this week.
+    //
+    // Chat reads memory but never writes it. Extraction lives in the
+    // brief, which sees the whole day once; a chat turn sees a slice and
+    // would learn the same fact from three different angles, three times.
+    const lastUserMessage =
+      [...history].reverse().find((m) => m.role === "user")?.content ?? "";
+    const remembered = await recallFacts(userId, lastUserMessage);
+
     const systemPrompt = [
-      SYSTEM_PROMPT + profileToPromptContext(profile),
+      SYSTEM_PROMPT +
+        profileToPromptContext(profile) +
+        factsToPromptContext(remembered),
       "",
       ...nowLines(timeZone),
       "",

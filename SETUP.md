@@ -183,12 +183,23 @@ create table if not exists public.user_profile (
   quiet_hours         text,
   weekend_contact     text,
 
+  -- not from the interview: the chat card's "read replies aloud" toggle
+  voice_replies       boolean,
+
   completed_at        timestamptz,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
 
 alter table public.user_profile enable row level security;
+```
+
+Already have the table from before voice shipped? One column, and no
+backfill — a null reads as muted, which is the default anyway:
+
+```sql
+alter table public.user_profile
+  add column if not exists voice_replies boolean;
 ```
 
 The row's *existence* is what stops the dashboard redirecting someone
@@ -223,6 +234,42 @@ alter table public.action_log add constraint action_log_undo_check
                   'remove_filter', 'untrash', 'delete_event',
                   'restore_event', 'none'));
 ```
+
+### 1a-nonies. What Nexus remembers
+
+Short facts Nexus infers about the user while it writes their brief.
+This is ROADMAP.md's memory layer, and the columns are the roadmap's
+three rules made structural: a source that can't be null, an expiry, and
+rows a user can really delete.
+
+```sql
+create table if not exists public.user_facts (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      text not null,
+  category     text not null check (category in
+                 ('person', 'deadline', 'project', 'preference')),
+  fact         text not null,
+  -- the message id or event key this was read out of. Not null on
+  -- purpose: a fact with no source can't be checked, and an
+  -- unfalsifiable claim in a prompt is what this table exists to avoid.
+  source_id    text not null,
+  source_label text,
+  source_kind  text,
+  -- null means "no reason to think this stops being true" (who someone
+  -- is). A date means it rots — every deadline gets one, whether or not
+  -- the model supplied it.
+  expires_at   timestamptz,
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists user_facts_user_created_idx
+  on public.user_facts (user_id, created_at desc);
+
+alter table public.user_facts enable row level security;
+```
+
+Rows are deleted, never flagged. "Every fact is visible and deletable"
+means nothing if forgetting leaves the row behind.
 
 ### 1b. Grab the environment variables
 
@@ -974,6 +1021,8 @@ that actually happened, not a hypothetical:
 | `schedule.test.cjs` | Emailing twice across midnight, skipping the day 2am doesn't exist, and treating a Friday-night retry as Saturday |
 | `rss.test.cjs` | Nine ways a real publisher's feed broke the hand-rolled parser |
 | `news-preferences.test.cjs` | A retired onboarding option silently switching news off for existing users |
+| `memory.test.cjs` | A fact citing a message the model was never shown, a deadline that never expires, and the same fact being re-learned every morning |
+| `speakable-text.test.cjs` | Markdown being read out literally — "star star Sarah star star", a URL spelled character by character |
 
 The bias is toward parsing and decisions — the places where being subtly
 wrong looks exactly like working correctly. There is deliberately no
@@ -1026,6 +1075,62 @@ and `tests/action-targets.test.cjs` holds the two ends together. If you
 add an action kind, go through those helpers rather than writing the keys
 by hand.
 
+## 8b. Talking to it, and it talking back
+
+Chat has a mic button and can read its answers aloud. Both halves use the
+browser's own Web Speech API — `SpeechRecognition` for the mic,
+`speechSynthesis` for the voice — wrapped in `app/dashboard/useSpeech.ts`.
+
+**No key, no cost, no audio through Nexus.** This is the reason for the
+choice. A hosted transcription service would be more accurate and a
+hosted voice would sound better, but "we also stream your microphone to a
+third party" is a much larger ask from an app that already reads your
+mail. (Chrome's implementation does send audio to Google for
+transcription — that's the platform, not Nexus, and it's the same trade
+already made by using Chrome's own voice input.)
+
+**Push-to-talk, not hands-free, and that is the safety model.** The
+transcript lands in the ordinary chat input and the user still presses
+Send. Nothing about the request to `/api/chat` changes, so every guard in
+section 8 applies unchanged — and, more to the point, a mis-heard
+"archive the newsletters" sits in an editable box instead of executing.
+Auto-send on silence is the obvious next feature and the one that would
+undo this.
+
+**Firefox has no `SpeechRecognition`, so the button doesn't render.**
+Feature-detected in an effect rather than at render, because the server
+has no `window` and a first paint that disagrees with the client is a
+hydration mismatch. The one error worth surfacing is `not-allowed` — a
+blocked mic is fixable and the fix isn't discoverable; `no-speech`,
+`aborted` and `network` are ordinary ends to a mic session and return to
+idle silently.
+
+**Speaking is muted by default and stored in the profile.**
+`user_profile.voice_replies`, toggled from either the chat card or
+settings, not localStorage — preferences in Nexus follow the user across
+devices. An app that starts talking in an open-plan office without being
+asked is a first impression people fix by closing the tab.
+
+**Replies go through `speakableText` first** (`lib/speech-text.ts`,
+tested). Claude writes to be read: bullets, bold, backticked column
+names, the odd URL. Read literally, all of that is the difference between
+a finished-sounding feature and a screen reader having a bad day. Action
+receipts are not spoken — the Undo button is on screen, and reading undo
+affordances aloud is noise.
+
+**Two platform quirks, both handled, both easy to re-break.**
+`speechSynthesis` lives on `window`, not in React, and will happily keep
+talking after the component unmounts — hence the cancel in the effect
+cleanup, and the cancel before each new utterance so two answers don't
+queue up back to back. And iOS won't play synthesised speech at all until
+something has been spoken inside a user gesture, so tapping the mic or
+the voice toggle fires a silent utterance to unlock it.
+
+**The known ceiling is voice quality.** Browser voices are good on macOS
+and rough elsewhere, and there's no fixing that for free. `speak(text)`
+is deliberately its own small surface so swapping in a hosted voice later
+is one file rather than a rewrite.
+
 ## 9. The activity page
 
 `/dashboard/activity` — everything Nexus has changed on the account,
@@ -1063,3 +1168,65 @@ change three things and a conversation scrolls away.
   structurally reversible — nothing recorded to act on, or a kind the
   undo route doesn't handle. Clicking again can't help, so the row says
   so instead of inviting a retry that fails forever.
+
+## 10. The memory layer
+
+Nexus takes notes. While the brief is being written, the same model call
+records any durable fact today's mail or calendar revealed — who a person
+is to the user, a deadline they're working toward, a project in flight,
+how they like to work — and those notes are read back into every later
+brief and chat answer. `lib/memory.ts`, table `user_facts`.
+
+This is Layer 2 from ROADMAP.md — inferred, not told — and it is the
+first thing in the app that writes something about the user the user
+never said. Everything below follows from that.
+
+**Extraction is free.** `facts` is a field on the existing `write_brief`
+tool, not a second model call. The roadmap's cost warning is explicit
+about model calls scaling with usage, and the brief already has the whole
+day in context — a separate extraction pass would pay twice to read the
+same mail. It also means extraction happens about once a day per user,
+which is the right cadence: the brief is cached, so a refresh doesn't
+re-learn.
+
+**The field is required with a zero floor.** The news section learned
+this the expensive way — a low-effort model hands back an optional array
+roughly never. `minItems: 0` with the field required makes the model
+decide rather than skip, and the prompt says plainly that zero is the
+normal answer.
+
+**Every fact cites a source, and the citation is checked.**
+`sanitizeExtractedFacts` drops any fact whose `sourceId` isn't one of the
+message ids or event keys actually handed to the model on that run. Same
+enforcement, same reasoning as `resolveNewsHighlights`: a model told to
+cite can still not cite, and one that invented the citation invented the
+fact. A category outside the enum is dropped rather than defaulted, for
+the same reason.
+
+**Facts expire, and deadlines expire whether or not the model said so.**
+An undated deadline gets 30 days; nothing at all is kept past a year
+without being re-observed; an expiry already in the past is treated as
+missing. A stale fact is worse than a missing one, because in a prompt it
+reads as confident.
+
+**Retrieval is keyword overlap, and preferences get a floor.**
+`selectFacts` scores a fact by how many of its words appear in what the
+call is about — today's subjects and senders for the brief, the question
+itself for chat. Preferences ("no meetings before 10") get +1 without
+needing a match, because they're relevant to questions that share none of
+their vocabulary. Vector search is a later optimization; at a few dozen
+facts per user it would be machinery bought for a problem nobody has.
+
+**Chat reads memory but never writes it.** A chat turn sees a slice of
+the mailbox and would learn the same fact from three different angles in
+one conversation. One writer, and it's the one that sees the whole day.
+
+**Reading memory can fail without breaking anything.** Same rule as the
+profile: an unreadable memory is an empty one, and a user whose facts
+don't load gets exactly the brief they got before this existed.
+
+**`/dashboard/memory` is the price of admission.** Everything inferred is
+listed with what it was read out of, when it was learned, and when it
+will be forgotten — and Forget really deletes the row. Inferring things
+about someone off-screen is how a useful feature becomes a creepy one;
+the roadmap says surface the inference, and this page is that.

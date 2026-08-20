@@ -51,6 +51,11 @@ export type UserProfileRow = {
   quiet_hours: string | null;
   weekend_contact: string | null;
 
+  // Not part of the interview — a toggle set from the chat card and the
+  // settings page. It lives here because preferences in Nexus follow the
+  // user across devices, which localStorage wouldn't.
+  voice_replies: boolean | null;
+
   completed_at: string | null;
   created_at?: string;
   updated_at?: string;
@@ -127,6 +132,18 @@ export function sanitizeAnswers(
     // its own question — the browser knows it and asking would be silly.
     if (field === "timezone") {
       patch.timezone = clampText(raw);
+      continue;
+    }
+
+    // The only boolean, and the only field here that no interview
+    // question declares — so it needs its own case rather than falling
+    // through to the question-driven validation below.
+    if (field === "voice_replies") {
+      if (typeof raw === "boolean") patch.voice_replies = raw;
+      else if (raw === "true") patch.voice_replies = true;
+      else if (raw === "false") patch.voice_replies = false;
+      // Anything else is a client sending nonsense: leave the stored
+      // value alone rather than guessing at it.
       continue;
     }
 

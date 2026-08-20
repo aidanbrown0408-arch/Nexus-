@@ -23,6 +23,18 @@ import {
   type NewsCategory,
 } from "@/lib/news";
 import {
+  selectFacts,
+  rememberFacts,
+  pruneExpiredFacts,
+  sanitizeExtractedFacts,
+  factsToPromptContext,
+  normalizeFact,
+  listFacts,
+  liveFacts,
+  FACT_CATEGORIES,
+  type Fact,
+} from "@/lib/memory";
+import {
   fetchMarketSnapshot,
   isMarketsConfigured,
   type MarketSnapshot,
@@ -120,7 +132,16 @@ const SYSTEM_PROMPT =
   "matters — selection only. Return fewer than 2 only if the list is " +
   "genuinely all irrelevant to them, which is rare when a list is " +
   "provided at all. These sit at the bottom of the brief — never the " +
-  "headline, never a priority.";
+  "headline, never a priority. " +
+  "You also keep notes. Alongside the brief you record any durable fact " +
+  "about this user that today's mail or calendar revealed and that would " +
+  "help you read tomorrow's — who a person is to them, a deadline they " +
+  "are working toward, a project in flight, how they like to work. Most " +
+  "days this is zero to three things, and often zero: a fact that is " +
+  "only true today is not a fact worth keeping, and neither is one you " +
+  "were already told about them. Every note cites the message id or " +
+  "event key it came from, and a note citing anything else is thrown " +
+  "away.";
 
 // How many headlines the brief can carry. Referenced by the tool schema
 // and by the resolver, so the two can't drift apart.
@@ -182,6 +203,56 @@ function buildBriefTool(newsCount: number) {
           type: "string",
           description: "One line on the shape of the day.",
         },
+        // Required with a zero floor rather than optional. The news
+        // field taught this: a low-effort model hands back an optional
+        // array roughly never. Required-but-emptyable makes the model
+        // decide rather than skip, and an empty array is the honest
+        // answer most mornings.
+        facts: {
+          type: "array",
+          maxItems: 6,
+          minItems: 0,
+          description:
+            "Durable facts about the user learned from today's data. " +
+            "Zero is the normal answer — record something only if it " +
+            "would still be worth knowing next week. Never record " +
+            "what is already in the notes you were given, and never " +
+            "record the contents of a single email as a fact about " +
+            "the person.",
+          items: {
+            type: "object",
+            properties: {
+              fact: {
+                type: "string",
+                description:
+                  "One sentence, written about the user in the third " +
+                  "person: 'Marcus is their co-founder.'",
+              },
+              category: {
+                type: "string",
+                enum: FACT_CATEGORIES as unknown as string[],
+                description:
+                  "person: who someone is to them. deadline: something " +
+                  "with a date. project: work in flight. preference: " +
+                  "how they work.",
+              },
+              sourceId: {
+                type: "string",
+                description:
+                  "The id of the email, or the key of the event, this " +
+                  "was read out of. Must be one you were given.",
+              },
+              expiresAt: {
+                type: "string",
+                description:
+                  "ISO date after which this stops being true. Required " +
+                  "in spirit for deadlines; omit for things with no " +
+                  "natural end, like who someone is.",
+              },
+            },
+            required: ["fact", "category", "sourceId"],
+          },
+        },
         ...(includeNews
           ? {
               newsHighlights: {
@@ -229,6 +300,7 @@ function buildBriefTool(newsCount: number) {
         "headline",
         "priorities",
         "scheduleNote",
+        "facts",
         // Only when there are articles to choose from — buildBriefTool's
         // whole `includeNews` split exists so a user who didn't ask for
         // news is never handed a field about it.
@@ -663,6 +735,39 @@ export async function generateBrief(
     return storeAndReturn(userId, today, brief);
   }
 
+  // What Nexus has learned about this user on previous days.
+  //
+  // The whole list is read, not just the part that goes in the prompt:
+  // the selection below decides what's worth spending context on today,
+  // while the full set is what stops the model re-learning the same fact
+  // every morning. Both come from one query.
+  let knownFacts: Fact[] = [];
+  try {
+    knownFacts = liveFacts(await listFacts(userId));
+  } catch (err) {
+    console.error("Brief: memory unavailable", errorMessage(err));
+  }
+
+  // Everything today is about, as one bag of words for the keyword match.
+  const memoryContext = [
+    ...narrowedEmails.map((m) => `${m.from} ${m.subject} ${m.snippet}`),
+    ...narrowedEvents.map((e) => e.summary),
+  ].join(" ");
+  const remembered = selectFacts(knownFacts, memoryContext);
+
+  // Which ids a new fact is allowed to cite: exactly what the model is
+  // about to be shown, and nothing else.
+  const factSources = new Map<
+    string,
+    { kind: "email" | "calendar"; label: string }
+  >();
+  for (const email of narrowedEmails) {
+    factSources.set(email.id, { kind: "email", label: email.subject });
+  }
+  for (const event of narrowedEvents) {
+    factSources.set(event.key, { kind: "calendar", label: event.summary });
+  }
+
   // Claude gets its own try/catch: the mail and calendar data loaded fine, so
   // a generation failure is a smaller problem than a fetch failure and the UI
   // should be able to say "retry" rather than "something broke".
@@ -672,7 +777,10 @@ export async function generateBrief(
       model: BRIEF_MODEL,
       max_tokens: 4096,
       output_config: { effort: "low" },
-      system: SYSTEM_PROMPT + profileToPromptContext(profile),
+      system:
+        SYSTEM_PROMPT +
+        profileToPromptContext(profile) +
+        factsToPromptContext(remembered),
       tools: [buildBriefTool(narrowedArticles.length)],
       tool_choice: { type: "tool", name: "write_brief" },
       messages: [
@@ -779,6 +887,25 @@ export async function generateBrief(
           `available, ${newsHighlights.length} survived title matching`
       );
     }
+
+    // Notes, checked before they're kept: a citation to something the
+    // model wasn't shown is dropped, and so is a fact already in memory.
+    const learned = sanitizeExtractedFacts(
+      (toolUse.input as Record<string, unknown>).facts,
+      {
+        sources: factSources,
+        existing: knownFacts.map((fact) => normalizeFact(fact.fact)),
+      }
+    );
+    if (learned.length) {
+      const stored = await rememberFacts(userId, learned);
+      console.log(
+        `[memory] ${stored} new fact(s) from ${knownFacts.length} already known`
+      );
+    }
+    // Once a day per user, which is what this route amounts to, is the
+    // right cadence for a sweep — and nobody waits on it.
+    void pruneExpiredFacts(userId);
 
     const brief: Brief = {
       greeting: toolUse.input.greeting,

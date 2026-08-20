@@ -44,6 +44,10 @@ function valuesFromProfile(
 export default function ProfileSettingsForm() {
   const [state, setState] = useState<SaveState>("loading");
   const [values, setValues] = useState<FormValues>({});
+  // Not an interview question — a preference the chat card also toggles —
+  // so it's held beside the question-driven values rather than folded
+  // into them, and rides along in the same PATCH.
+  const [voiceReplies, setVoiceReplies] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,6 +59,7 @@ export default function ProfileSettingsForm() {
         const body = (await res.json()) as { profile: Record<string, unknown> | null };
         if (!cancelled) {
           setValues(valuesFromProfile(body.profile));
+          setVoiceReplies(body.profile?.voice_replies === true);
           setState("idle");
         }
       } catch {
@@ -83,7 +88,11 @@ export default function ProfileSettingsForm() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          answers: { ...values, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+          answers: {
+            ...values,
+            voice_replies: voiceReplies,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
         }),
       });
       if (!res.ok) throw new Error("save failed");
@@ -147,6 +156,32 @@ export default function ProfileSettingsForm() {
               setField={setField}
             />
           ))}
+
+          <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+            <h2 className="text-base font-semibold text-neutral-900">Voice</h2>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              How Nexus sounds when you talk to it in chat.
+            </p>
+
+            <label className="mt-5 flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={voiceReplies}
+                onChange={(e) => setVoiceReplies(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-400"
+              />
+              <span>
+                <span className="block text-sm font-medium text-neutral-800">
+                  Read replies aloud
+                </span>
+                <span className="mt-0.5 block text-xs text-neutral-500">
+                  Chat answers are spoken by your browser. The mic button for
+                  asking by voice is always there — this only controls whether
+                  Nexus talks back.
+                </span>
+              </span>
+            </label>
+          </section>
 
           <div className="mt-6 flex items-center gap-3">
             <button
