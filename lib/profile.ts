@@ -210,6 +210,51 @@ export async function markOnboardingSeen(
   });
 }
 
+/**
+ * Everyone who could be sent a scheduled brief.
+ *
+ * Only the columns the scheduler needs: deciding whether it's someone's
+ * morning takes a time and a zone, and pulling whole profiles for every
+ * user every hour would be a lot of rows to read to answer that.
+ *
+ * `completed_at` gates it because an unfinished interview means the user
+ * never chose a morning time — sending at a default hour would be Nexus
+ * deciding to email someone who hadn't asked.
+ */
+export type DeliveryCandidate = {
+  user_id: string;
+  morning_time: string | null;
+  timezone: string | null;
+  weekend_contact: string | null;
+};
+
+export async function listDeliveryCandidates(): Promise<DeliveryCandidate[]> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      // Singular, like every other query in this file. Plural silently
+      // returned zero rows and read as "nobody is due this hour", which
+      // is exactly what a working scheduler with no due users looks
+      // like — the feature was dead and reported healthy.
+      .from("user_profile")
+      .select("user_id, morning_time, timezone, weekend_contact")
+      .not("morning_time", "is", null)
+      .not("completed_at", "is", null);
+
+    if (error) {
+      console.error("Delivery candidates query failed", error.message);
+      return [];
+    }
+    return (data ?? []) as DeliveryCandidate[];
+  } catch (err) {
+    console.error(
+      "Delivery candidates query failed",
+      err instanceof Error ? err.message : String(err)
+    );
+    return [];
+  }
+}
+
 // --- using it -----------------------------------------------------------
 
 function labelFor(
@@ -447,46 +492,100 @@ export function profileToDraftContext(
 }
 
 /**
- * The VIP list, normalized for matching against a sender.
+ * The VIP list, parsed for matching against a sender.
  *
- * The interview asks for VIPs in free text, so a row holds a mix of
- * "Sarah Chen", "sarah@acme.com", and "my co-founder Marcus". Terms
- * shorter than three characters are dropped — an initial would match
- * half an inbox, and a false VIP is worse than a missed one here,
- * because it silently removes things from the archive list.
+ * The interview asks for VIPs in free text and its own help text suggests
+ * "my co-founder Marcus", so a row holds a mix of bare names, addresses,
+ * "Name <addr>" pairs, and sentences. Two earlier approaches both failed,
+ * in opposite directions:
+ *
+ *   - Whole-string `includes` missed every phrase entry. "my co-founder
+ *     marcus" is not a substring of "Marcus Lee" or of marcus@acme.com,
+ *     so the most-suggested format protected nobody.
+ *   - Substring matching against the raw address protected far too much.
+ *     A VIP of "Ann" matched announcements@stripe.com; "Sam" matched
+ *     everything at samsung.com; "Lee" matched fleet@.
+ *
+ * So: addresses are pulled out and matched exactly, and the remaining
+ * words are matched as whole tokens against the sender's whole tokens.
+ * "Sarah Chen" finds sarah.chen@acme.com; "Ann" no longer finds
+ * announcements@.
  */
-export function vipTerms(profile: UserProfileRow | null): string[] {
-  return (profile?.vips ?? [])
-    .map((vip) => vip.trim().toLowerCase())
-    .filter((vip) => vip.length >= 3);
+export type VipTerms = {
+  emails: string[];
+  names: string[];
+};
+
+// Words that carry no identity. Without these, "my co-founder Marcus"
+// would also protect anything from founders@ or partners@.
+const VIP_STOPWORDS = new Set([
+  "my", "our", "the", "and", "for", "from", "with",
+  "co", "cofounder", "co-founder", "founder", "boss", "manager",
+  "colleague", "coworker", "co-worker", "assistant", "partner",
+  "wife", "husband", "spouse", "friend", "team", "work", "client",
+  "mum", "mom", "dad", "sister", "brother", "email", "mail",
+]);
+
+const EMAIL_PATTERN = /[^\s<>()"']+@[^\s<>()"']+\.[^\s<>()"']+/g;
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3 && !VIP_STOPWORDS.has(token));
+}
+
+export function vipTerms(profile: UserProfileRow | null): VipTerms {
+  const emails: string[] = [];
+  const names: string[] = [];
+
+  for (const raw of profile?.vips ?? []) {
+    const entry = raw.trim();
+    if (!entry) continue;
+
+    const found = entry.match(EMAIL_PATTERN) ?? [];
+    for (const address of found) emails.push(address.toLowerCase());
+
+    // Whatever is left once the addresses are removed is the name part —
+    // "Sarah Chen" out of "Sarah Chen <sarah@acme.com>".
+    const remainder = entry.replace(EMAIL_PATTERN, " ");
+    for (const token of tokenize(remainder)) names.push(token);
+  }
+
+  return {
+    emails: Array.from(new Set(emails)),
+    names: Array.from(new Set(names)),
+  };
+}
+
+export function hasVips(terms: VipTerms): boolean {
+  return terms.emails.length > 0 || terms.names.length > 0;
 }
 
 /**
- * Whether a sender looks like someone on the VIP list.
+ * Whether a sender is someone on the VIP list.
  *
- * An emailish term has to match the address exactly — a substring match
- * on an address would let "sarah@acme.com" match a forwarding alias that
- * merely contains it. Everything else matches loosely against the display
- * name and the local part, because "Sarah Chen" has to find
- * "sarah.chen@acme.com" and people write their VIPs as names.
+ * Addresses must match exactly — a substring match would let a listed
+ * address match a forwarding alias that merely contains it. Names match
+ * whole tokens on either the display name or the address's local part,
+ * so "Sarah Chen" finds sarah.chen@acme.com without "Ann" finding
+ * announcements@.
  */
 export function matchesVip(
   from: string,
   fromEmail: string,
-  terms: string[]
+  terms: VipTerms
 ): boolean {
-  if (!terms.length) return false;
+  const email = fromEmail.trim().toLowerCase();
+  if (terms.emails.includes(email)) return true;
+  if (!terms.names.length) return false;
 
-  const name = from.toLowerCase();
-  const email = fromEmail.toLowerCase();
+  // The domain is deliberately excluded: matching on it would protect a
+  // whole company because one person there is a VIP.
   const localPart = email.split("@")[0] ?? "";
+  const senderTokens = new Set(
+    tokenize(from).concat(tokenize(localPart))
+  );
 
-  return terms.some((term) => {
-    if (term.includes("@")) return email === term;
-    if (name.includes(term) || email.includes(term)) return true;
-    // "Sarah Chen" against "sarah.chen@acme.com": the address has no
-    // spaces, so compare against a de-punctuated local part too.
-    const flat = localPart.replace(/[._\-+]/g, " ");
-    return flat.includes(term);
-  });
+  return terms.names.some((name) => senderTokens.has(name));
 }

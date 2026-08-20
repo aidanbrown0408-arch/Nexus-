@@ -1,6 +1,7 @@
 import { getAnthropicClient, TRIAGE_MODEL } from "./anthropic";
 import { nowLines, resolveTimezone } from "./clock";
 import {
+  hasVips,
   matchesVip,
   profileToPromptContext,
   vipTerms,
@@ -135,6 +136,7 @@ export async function proposeArchive(
   const anthropic = getAnthropicClient();
   const timeZone = resolveTimezone(profile?.timezone);
   const vips = vipTerms(profile);
+  const protectingVips = hasVips(vips);
 
   // Two extra instructions on top of the general profile block, because
   // triage acts on these lists rather than merely reading them.
@@ -216,7 +218,7 @@ export async function proposeArchive(
     // The rule, enforced. The prompt already asked for this; asking is
     // not the same as guaranteeing, and this is the one place where a
     // single wrong call costs the user a message they were waiting for.
-    if (matchesVip(message.from, message.fromEmail, vips)) {
+    if (protectingVips && matchesVip(message.from, message.fromEmail, vips)) {
       vipProtected += 1;
       continue;
     }
