@@ -125,29 +125,70 @@ const SOURCE_LABEL: Record<Priority["source"], string> = {
   both: "Email + Calendar",
 };
 
+// "Written 7:04 AM" while it's today's; a date once it isn't, so a brief
+// left open overnight can't read as this morning's.
+function formatGeneratedAt(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return sameDay
+    ? at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function BriefSection() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
-  const fetchBrief = useCallback(async () => {
+  // `regenerate` is the difference between "show me the brief" and "spend
+  // a model call on a new one". The first is what a page load does; the
+  // second only ever happens because the user asked.
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
+
+  const fetchBrief = useCallback(async (regenerate = false) => {
     setRefreshing(true);
+    setRewriteError(null);
     try {
-      const res = await fetch("/api/brief", { cache: "no-store" });
+      // The browser's zone is sent so a user who skipped the timezone
+      // question still gets a brief keyed to their day rather than the
+      // server's. The profile's answer wins where there is one.
+      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const params = new URLSearchParams();
+      if (regenerate) params.set("refresh", "1");
+      if (zone) params.set("tz", zone);
+
+      const res = await fetch(`/api/brief?${params.toString()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         if (body?.code === "not_connected") {
+          setGeneratedAt(null);
           setStatus({ kind: "disconnected" });
           return;
         }
         throw new Error(body?.error ?? "Failed to load your brief");
       }
-      const body = (await res.json()) as { brief: Brief };
+      const body = (await res.json()) as {
+        brief: Brief;
+        generatedAt?: string;
+      };
+      setGeneratedAt(body.generatedAt ?? null);
       setStatus({ kind: "ready", brief: body.brief });
     } catch (err) {
-      setStatus({
-        kind: "error",
-        message:
-          err instanceof Error ? err.message : "Failed to load your brief",
+      const message =
+        err instanceof Error ? err.message : "Failed to load your brief";
+      // A rewrite that fails must not take the brief already on screen
+      // with it. The old one is still true, still stored, and still
+      // better than red text where a brief used to be.
+      setStatus((current) => {
+        if (current.kind === "ready") {
+          setRewriteError(message);
+          return current;
+        }
+        setGeneratedAt(null);
+        return { kind: "error", message };
       });
     } finally {
       setRefreshing(false);
@@ -155,6 +196,9 @@ export default function BriefSection() {
   }, []);
 
   useEffect(() => {
+    // No argument: a page load reads the stored brief. React's
+    // development double-render therefore costs two Supabase reads
+    // rather than two model calls.
     fetchBrief();
   }, [fetchBrief]);
 
@@ -169,17 +213,24 @@ export default function BriefSection() {
           </h2>
           <p className="text-sm text-neutral-500">
             What needs you today, across mail and calendar.
+            {generatedAt && (
+              <span className="text-neutral-400">
+                {" "}
+                Written {formatGeneratedAt(generatedAt)}.
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {status.kind === "ready" && (
             <button
               type="button"
-              onClick={fetchBrief}
+              onClick={() => fetchBrief(true)}
               disabled={refreshing}
+              title="Writes a new brief from your current mail, calendar and markets"
               className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {refreshing ? "Refreshing…" : "Refresh"}
+              {refreshing ? "Rewriting…" : "Rewrite"}
             </button>
           )}
           {status.kind === "disconnected" && (
@@ -193,7 +244,7 @@ export default function BriefSection() {
           {status.kind === "error" && (
             <button
               type="button"
-              onClick={fetchBrief}
+              onClick={() => fetchBrief(true)}
               disabled={refreshing}
               className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -273,6 +324,13 @@ export default function BriefSection() {
                 can be specific about what to do rather than hedging.
                 Silence was the original bug: a ticked box and no section
                 looks exactly like a setting that didn't save. */}
+            {rewriteError && (
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Couldn&apos;t rewrite the brief just now — {rewriteError}. This
+                is the one from earlier.
+              </p>
+            )}
+
             {status.brief.marketsUnavailable === "not_configured" && (
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Market prices need a data key — set{" "}

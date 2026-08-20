@@ -81,6 +81,29 @@ export type PrepStateRow = {
 // so the shape can vary by action without a migration per action type.
 // `undone_at` being null is what "still in effect" means; rows are never
 // deleted, so the history stays honest.
+// One stored brief per user per day. The brief is the most expensive
+// thing this app does — a multi-second model call over the whole inbox —
+// and nothing about it changes between a page refresh and the tab being
+// reopened five minutes later.
+export type BriefCacheRow = {
+  user_id: string;
+  // The user's calendar day, YYYY-MM-DD, in their own timezone. Not the
+  // server's: a cache keyed on a UTC day would expire mid-evening for
+  // half the world.
+  day: string;
+  brief: unknown;
+  created_at?: string;
+};
+
+// One row per brief actually emailed. Exists so a cron that runs every
+// hour, retries, or overlaps with itself can't send the same morning
+// twice — the one failure mode that would get the whole feature muted.
+export type BriefDeliveryRow = {
+  user_id: string;
+  day: string;
+  sent_at?: string;
+};
+
 export type ActionLogRow = {
   id: string;
   user_id: string;
