@@ -53,6 +53,7 @@ export default function FindTime({ guests, onPick }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           durationMinutes: duration,
           daysAhead,
           guestEmails: guests.map((g) => g.email),

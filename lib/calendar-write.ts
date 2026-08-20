@@ -88,6 +88,11 @@ export type EventSnapshot = {
   // restoring a weekly standup as a one-off is a bad way to find that
   // out.
   recurrence?: string[];
+  // Recorded because Google requires it on any insert carrying a
+  // recurrence, and because a rule authored in Europe/London re-expanded
+  // against a calendar's default zone drifts after a DST change. Older
+  // snapshots predate this field, so it stays optional.
+  timeZone?: string | null;
 };
 
 export type WrittenEvent = {
@@ -161,6 +166,17 @@ export async function createEvent(
 // Read an event back before deleting it, so there's something to restore
 // from. Returns null when the event is already gone — which makes the
 // delete a no-op rather than an error.
+// All-day events carry a bare date and must not be given a zone; timed
+// ones need it whenever a recurrence is being replayed.
+function withZone(
+  date: { date?: string; dateTime?: string },
+  timeZone: string | null | undefined,
+  allDay: boolean
+): { date?: string; dateTime?: string; timeZone?: string } {
+  if (allDay || !timeZone) return date;
+  return { ...date, timeZone };
+}
+
 export async function snapshotEvent(
   client: OAuth2Client,
   calendarId: string,
@@ -176,6 +192,7 @@ export async function snapshotEvent(
     return {
       calendarId,
       summary: e.summary ?? "(no title)",
+      timeZone: e.start?.timeZone ?? null,
       start: e.start?.dateTime ?? e.start?.date ?? "",
       end: e.end?.dateTime ?? e.end?.date ?? "",
       allDay,
@@ -249,13 +266,31 @@ export async function restoreEvent(
   // model doesn't cover.
   const res = await calendar.events.insert({
     calendarId,
-    sendUpdates: attendees.length ? "all" : "none",
+    // Never notifies. deleteEvent defaults to notifying nobody so that
+    // "a mistake stays quiet enough to fix" — and then the fix itself
+    // mailed a fresh invitation to twelve guests who were never told the
+    // meeting was cancelled. An undo should be as quiet as the thing it
+    // reverses.
+    sendUpdates: "none",
     requestBody: {
       summary: snapshot.summary,
       location: snapshot.location ?? undefined,
       description: snapshot.description ?? undefined,
-      start: toEventDate(snapshot.start, snapshot.allDay),
-      end: toEventDate(snapshot.end, snapshot.allDay),
+      // Google rejects an insert that carries `recurrence` without a
+      // timeZone on both ends, so restoring a deleted series — the most
+      // destructive thing this app can do, and the one whose undo most
+      // needs to work — failed outright. The snapshot's own zone is used
+      // where it recorded one; the calendar's default otherwise.
+      start: withZone(
+        toEventDate(snapshot.start, snapshot.allDay),
+        snapshot.timeZone,
+        snapshot.allDay
+      ),
+      end: withZone(
+        toEventDate(snapshot.end, snapshot.allDay),
+        snapshot.timeZone,
+        snapshot.allDay
+      ),
       attendees: attendees.length ? attendees : undefined,
       recurrence: snapshot.recurrence?.length ? snapshot.recurrence : undefined,
     },
@@ -279,11 +314,25 @@ export function validateEventTimes(
   allDay: boolean
 ): string | null {
   const startMs = new Date(allDay ? `${start.slice(0, 10)}T00:00:00` : start).getTime();
+  // An all-day event's end is the same date as its start for a one-day
+  // event — which is what any date picker produces. Comparing bare dates
+  // would make that "ends before it starts"; comparing against the end of
+  // the day lets it through, and Google's own exclusive-end handling
+  // takes it from there.
   const endMs = new Date(allDay ? `${end.slice(0, 10)}T23:59:59` : end).getTime();
 
   if (Number.isNaN(startMs)) return "That start time isn't a real date.";
   if (Number.isNaN(endMs)) return "That end time isn't a real date.";
   if (endMs <= startMs) return "The event ends before it starts.";
+
+  // The doc comment above has always claimed this check; the code never
+  // had it. Creating an event in the past mails invitations for a meeting
+  // that already happened — recoverable, but confusing enough to be worth
+  // refusing. A day of slack, so a timezone the client and server
+  // disagree about can't reject a legitimate booking this morning.
+  if (endMs < Date.now() - 24 * 60 * 60 * 1000) {
+    return "That's in the past. Pick a time from today onwards.";
+  }
 
   return null;
 }

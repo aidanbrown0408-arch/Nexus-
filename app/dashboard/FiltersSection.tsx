@@ -52,7 +52,17 @@ type Stage =
       preview: Preview;
     }
   | { kind: "creating" }
-  | { kind: "done"; label: string; sweptCount: number; sweepActionId: string | null }
+  | {
+      kind: "done";
+      label: string;
+      sweptCount: number;
+      // Roughly how many still match after one page was moved. The
+      // checkbox offers to clear "the N already in your mailbox", and
+      // the sweep caps at 200 — saying nothing let someone believe the
+      // backlog was gone.
+      sweepRemaining: number;
+      sweepActionId: string | null;
+    }
   | { kind: "error"; message: string; needsReconnect: boolean };
 
 function describe(criteria: Criteria): string {
@@ -162,6 +172,7 @@ export default function FiltersSection() {
         kind: "done",
         label,
         sweptCount: body.sweptCount ?? 0,
+        sweepRemaining: body.sweepRemaining ?? 0,
         sweepActionId: body.sweepActionId ?? null,
       });
       setDescription("");
@@ -229,6 +240,12 @@ export default function FiltersSection() {
                   <span>
                     {stage.sweptCount} existing message
                     {stage.sweptCount === 1 ? "" : "s"} moved to Trash.
+                    {stage.sweepRemaining > 0 && (
+                      <>
+                        {" "}About {stage.sweepRemaining} more still match —
+                        run this again to clear the next batch.
+                      </>
+                    )}
                   </span>
                   {stage.sweepActionId && (
                     <button

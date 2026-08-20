@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import type { RawEvent } from "./events";
+import { resolveTimezone, zonedParts } from "./clock";
 
 // "Find 30 minutes with Sarah this week."
 //
@@ -29,6 +30,9 @@ export type AvailabilityRequest = {
   // technically free at 4am is not a slot.
   workdayStartHour: number;
   workdayEndHour: number;
+  // The zone those hours are in. Without it they were read on the host,
+  // which is UTC — so "9 to 6" meant 9 to 6 UTC for everyone.
+  timeZone?: string | null;
   // Guests whose calendars should also be checked. Google only returns
   // real detail for people who share their calendar with the user;
   // everyone else comes back empty, which reads as "free" — see
@@ -70,6 +74,16 @@ export function eventsToBusy(events: RawEvent[]): BusyBlock[] {
     .map((event) => {
       if (event.allDay) {
         const day = new Date(`${event.start.slice(0, 10)}T00:00:00`);
+        // The event's own end, not "the next day". A five-day "Annual
+        // leave" was blocking Monday and leaving Tuesday to Friday
+        // bookable — the function's own comment says that is exactly what
+        // it exists to prevent. All-day ends are already exclusive in
+        // both Google and CalDAV, so no day is added when one is present.
+        const rawEnd = event.end?.slice(0, 10);
+        const end = rawEnd ? new Date(`${rawEnd}T00:00:00`) : null;
+        if (end && end.getTime() > day.getTime()) {
+          return { start: day.getTime(), end: end.getTime() };
+        }
         const next = new Date(day);
         next.setDate(next.getDate() + 1);
         return { start: day.getTime(), end: next.getTime() };
@@ -89,7 +103,9 @@ export function mergeBusy(blocks: BusyBlock[]): BusyBlock[] {
   if (!blocks.length) return [];
 
   const sorted = [...blocks].sort((a, b) => a.start - b.start);
-  const merged: BusyBlock[] = [sorted[0]];
+  // Copied, not referenced: extending `last.end` below would otherwise
+  // write straight through into the caller's array.
+  const merged: BusyBlock[] = [{ ...sorted[0] }];
 
   for (const block of sorted.slice(1)) {
     const last = merged[merged.length - 1];
@@ -111,6 +127,7 @@ export function findSlots(
   now = new Date()
 ): Slot[] {
   const durationMs = request.durationMinutes * 60_000;
+  const timeZone = resolveTimezone(request.timeZone);
   const merged = mergeBusy(busy);
 
   const earliest = new Date(now.getTime() + LEAD_TIME_MINUTES * 60_000);
@@ -128,9 +145,16 @@ export function findSlots(
     const start = new Date(cursor);
     const end = new Date(cursor + durationMs);
 
-    const startHour = start.getHours() + start.getMinutes() / 60;
-    const endHour = end.getHours() + end.getMinutes() / 60;
-    const sameDay = start.toDateString() === end.toDateString();
+    // Read in the user's zone, not the host's. `getHours()` on a
+    // serverless host answers in UTC, so "9 to 6" was being applied to
+    // UTC — a Los Angeles user was offered 2am to 11am and never saw a
+    // free afternoon.
+    const from = zonedParts(start, timeZone);
+    const to = zonedParts(end, timeZone);
+
+    const startHour = from.hour + from.minute / 60;
+    const endHour = to.hour + to.minute / 60;
+    const sameDay = from.day === to.day;
 
     const withinHours =
       sameDay &&
@@ -138,14 +162,14 @@ export function findSlots(
       endHour <= request.workdayEndHour;
 
     if (!withinHours) {
-      // Jump straight to the next day's opening rather than stepping
-      // through the night a quarter-hour at a time.
-      const nextOpen = new Date(start);
-      if (startHour >= request.workdayEndHour || !sameDay) {
-        nextOpen.setDate(nextOpen.getDate() + 1);
-      }
-      nextOpen.setHours(request.workdayStartHour, 0, 0, 0);
-      const advanced = nextOpen.getTime();
+      // Jump straight to the next opening rather than stepping through
+      // the night a quarter-hour at a time. Computed as an offset from
+      // the current wall-clock hour so it lands correctly in the user's
+      // zone without having to construct a date in it.
+      const hoursAhead =
+        (request.workdayStartHour - startHour + 24) % 24 || 24;
+      const advanced =
+        Math.ceil((cursor + hoursAhead * 3_600_000) / step) * step;
       cursor = advanced > cursor ? advanced : cursor + step;
       continue;
     }

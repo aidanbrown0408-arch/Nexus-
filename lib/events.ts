@@ -80,7 +80,18 @@ export type RawEvent = Omit<EventSummary, "key">;
 
 function dedupeKeys(event: RawEvent): string[] {
   const keys: string[] = [];
-  if (event.uid) keys.push(`uid:${event.uid.trim().toLowerCase()}`);
+  // The occurrence has to be part of the key, not just the UID. Every
+  // instance of a recurring series shares one UID, so keying on it alone
+  // meant a weekly standup appeared once and every later occurrence was
+  // silently dropped from the merged list — the calendar card and the
+  // brief would say Wednesday was clear while a standup sat on it.
+  //
+  // eventKey below already reasoned this out for its own key ("otherwise
+  // 'print the agenda' would be checked off for every future Tuesday at
+  // once"); the dedupe key never had the same treatment applied.
+  if (event.uid) {
+    keys.push(`uid:${event.uid.trim().toLowerCase()}|${instant(event.start)}`);
+  }
   keys.push(
     `sig:${event.summary.trim().toLowerCase()}|${instant(event.start)}|${instant(
       event.end

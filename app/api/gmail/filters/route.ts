@@ -15,12 +15,19 @@ import {
   type FilterCriteria,
 } from "@/lib/filters";
 import { rejectDangerousCriteria } from "@/lib/filter-parse";
-import { logAction } from "@/lib/actions";
+import { actionTarget, logAction } from "@/lib/actions";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Note on the preview: this route re-validates criteria but cannot prove
+// a preview was ever shown — the client sends criteria from its own
+// state, and there is no token binding the two. That was worth naming
+// rather than implying otherwise, because the safety here comes from
+// `criteriaAreUsable` requiring a sender, recipient or subject anchor and
+// from `rejectDangerousCriteria`, not from the preview having run.
+//
 // The user's filters. Nexus's own and Gmail's alike — a rule the user
 // wrote in Gmail years ago is still deleting their mail, and hiding it
 // here would make this list a worse answer to "what's eating my inbox"
@@ -149,15 +156,29 @@ export async function POST(request: NextRequest) {
     // everything currently sitting in Trash.
     let swept: string[] = [];
     let sweepActionId: string | null = null;
+    let sweepRemaining = 0;
+
     if (sweepExisting) {
-      swept = await trashMatching(client, criteria);
+      const result = await trashMatching(client, criteria);
+      swept = result.ids;
+      // What's left behind after one page. Reported so the log entry and
+      // the card can both say "200 of about 1,400" — a user told the
+      // backlog is cleared when 1,200 remain will find out the hard way.
+      sweepRemaining = result.truncated
+        ? Math.max(0, result.totalMatched - swept.length)
+        : 0;
+
       if (swept.length) {
         const sweepAction = await logAction(userId, {
           kind: "trash",
-          summary: `Moved ${swept.length} existing message${
-            swept.length === 1 ? "" : "s"
-          } ${description} to Trash`,
-          target: { messageIds: swept.join(",") },
+          summary:
+            `Moved ${swept.length} existing message${
+              swept.length === 1 ? "" : "s"
+            } ${description} to Trash` +
+            (sweepRemaining
+              ? ` (about ${sweepRemaining} more still match)`
+              : ""),
+          target: actionTarget.messages(swept),
           undo: "untrash",
         });
         sweepActionId = sweepAction?.id ?? null;
@@ -168,6 +189,7 @@ export async function POST(request: NextRequest) {
       filter,
       label,
       sweptCount: swept.length,
+      sweepRemaining,
       actionId: filterAction?.id ?? null,
       sweepActionId,
     });

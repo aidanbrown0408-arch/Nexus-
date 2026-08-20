@@ -54,10 +54,18 @@ const SWEEP_LIMIT = 200;
 // Used for the preview and the backlog sweep, so both are guaranteed to
 // be looking at exactly what the filter will act on — a preview built
 // from different logic than the filter is worse than no preview.
+// Exported because the filter Gmail stores has to agree with the query
+// the preview ran. A multi-word subject unquoted is a word match — a
+// filter on `invoice reminder` would also trash "Reminder: your invoice
+// is ready" — while the preview quoted it into a phrase and showed
+// neither. Same helper on both sides, same meaning on both sides.
+export function quoteTerm(value: string): string {
+  return /[\s:]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+}
+
 export function criteriaToQuery(criteria: FilterCriteria): string {
   const parts: string[] = [];
-  const quote = (value: string) =>
-    /[\s:]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
+  const quote = quoteTerm;
 
   if (criteria.from) parts.push(`from:${quote(criteria.from)}`);
   if (criteria.to) parts.push(`to:${quote(criteria.to)}`);
@@ -71,13 +79,22 @@ export function criteriaToQuery(criteria: FilterCriteria): string {
 
 // A criteria set that matches nothing is a UI bug; one that matches
 // everything is a disaster. Both are caught here rather than at Google.
+/**
+ * Is there enough here to be a filter rather than a wildcard?
+ *
+ * A filter trashes mail that hasn't arrived yet, so "matches almost
+ * everything" is the failure that matters. `hasAttachment` used to
+ * qualify on its own: a description like "get rid of the giant
+ * attachment emails" could produce `{hasAttachment: true}`, whose query
+ * is exactly `has:attachment` — a standing rule that permanently trashes
+ * every future contract, invoice and photo.
+ *
+ * So attachment and free-text `query` are treated as narrowing only.
+ * Something has to name a sender, a recipient or a subject.
+ */
 export function criteriaAreUsable(criteria: FilterCriteria): boolean {
   return Boolean(
-    criteria.from?.trim() ||
-      criteria.to?.trim() ||
-      criteria.subject?.trim() ||
-      criteria.query?.trim() ||
-      criteria.hasAttachment
+    criteria.from?.trim() || criteria.to?.trim() || criteria.subject?.trim()
   );
 }
 
@@ -215,7 +232,10 @@ export async function createTrashFilter(
       criteria: {
         from: criteria.from || undefined,
         to: criteria.to || undefined,
-        subject: criteria.subject || undefined,
+        // Quoted exactly as the preview quoted it, so the standing rule
+        // catches what the user was shown and not a word-match superset
+        // of it.
+        subject: criteria.subject ? quoteTerm(criteria.subject) : undefined,
         query: criteria.query || undefined,
         negatedQuery: criteria.negatedQuery || undefined,
         hasAttachment: criteria.hasAttachment || undefined,
@@ -246,10 +266,21 @@ export async function deleteFilter(
 // what arrives next; clearing the existing pile is a bigger, more
 // surprising action, so it gets its own approval and its own log entry
 // with the ids needed to reverse it.
+export type SweepResult = {
+  ids: string[];
+  // Gmail's estimate of everything matching, which is usually larger
+  // than what one page can move. Reported rather than swallowed: the
+  // checkbox offers to move "the 1,400 already in your mailbox" and the
+  // sweep moves 200, and a user who isn't told that believes the backlog
+  // is gone.
+  totalMatched: number;
+  truncated: boolean;
+};
+
 export async function trashMatching(
   client: OAuth2Client,
   criteria: FilterCriteria
-): Promise<string[]> {
+): Promise<SweepResult> {
   if (!criteriaAreUsable(criteria)) {
     throw new Error("Refusing to sweep on criteria that match everything");
   }
@@ -262,7 +293,13 @@ export async function trashMatching(
   });
 
   const ids = (list.data.messages ?? []).map((m) => m.id!).filter(Boolean);
-  if (!ids.length) return [];
+  const totalMatched = list.data.resultSizeEstimate ?? ids.length;
+  // One page only, deliberately: a paginated sweep of thousands of
+  // messages is a bigger, slower action than a click should trigger.
+  // The cap is fine; hiding it was not.
+  const truncated = ids.length >= SWEEP_LIMIT;
+
+  if (!ids.length) return { ids, totalMatched, truncated: false };
 
   await gmail.users.messages.batchModify({
     userId: "me",
@@ -273,7 +310,7 @@ export async function trashMatching(
     },
   });
 
-  return ids;
+  return { ids, totalMatched, truncated };
 }
 
 // Put a sweep back. The ids come from the action log, so this restores

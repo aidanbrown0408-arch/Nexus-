@@ -13,6 +13,7 @@ import {
   type BusyBlock,
 } from "@/lib/availability";
 import { fetchAppleEvents, getAppleCredentials } from "@/lib/apple";
+import { getProfile } from "@/lib/profile";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -63,6 +64,10 @@ export async function POST(request: NextRequest) {
         typeof body.workdayStartHour === "number" ? body.workdayStartHour : 9,
       workdayEndHour:
         typeof body.workdayEndHour === "number" ? body.workdayEndHour : 18,
+      // The browser's zone as a fallback; the profile's answer wins
+      // below. Without one of the two, working hours are read on the
+      // host, which is UTC.
+      timeZone: typeof body.timeZone === "string" ? body.timeZone : null,
       guestEmails: Array.isArray(body.guestEmails)
         ? body.guestEmails
             .filter((g): g is string => typeof g === "string")
@@ -72,6 +77,15 @@ export async function POST(request: NextRequest) {
     };
   } catch {
     return NextResponse.json({ error: "Expected JSON" }, { status: 400 });
+  }
+
+  // What the user said their day looks like beats what their browser
+  // reports, since the profile is the answer they gave deliberately.
+  try {
+    const profile = await getProfile(userId);
+    if (profile?.timezone) spec.timeZone = profile.timezone;
+  } catch (err) {
+    console.error("Availability: profile unavailable", errorMessage(err));
   }
 
   try {
