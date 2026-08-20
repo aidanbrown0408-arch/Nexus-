@@ -61,9 +61,13 @@ export const NEWS_OPTIONS = [
 // the split still hold it, and dropping an unrecognized value silently
 // would take away news a user had actually asked for. Read support only
 // — nothing writes it now.
-export const LEGACY_NEWS_OPTIONS: Record<string, string[]> = {
-  general: ["us", "world"],
-};
+// Null-prototype so a stored value of "constructor" or "toString" is a
+// miss rather than a function. Unreachable today because writes are
+// whitelisted, and one character of defence against it ever changing.
+export const LEGACY_NEWS_OPTIONS: Record<string, string[]> = Object.assign(
+  Object.create(null),
+  { general: ["us", "world"] }
+);
 
 export const SECTIONS: Section[] = [
   {

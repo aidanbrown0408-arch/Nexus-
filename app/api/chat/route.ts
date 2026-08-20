@@ -6,6 +6,9 @@ import { gatherEvents } from "@/lib/calendar-sources";
 import { listPrepItems, type PrepItem } from "@/lib/prep";
 import type { EventSummary } from "@/lib/events";
 import { getAnthropicClient, CHAT_MODEL } from "@/lib/anthropic";
+import { CHAT_TOOLS, runChatTool } from "@/lib/chat-tools";
+import type { ActionRecord } from "@/lib/actions";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   getProfile,
   profileToPromptContext,
@@ -28,6 +31,14 @@ const SNIPPET_CHARS = 300;
 const CALENDAR_DAYS = 30;
 const MAX_HISTORY = 20;
 
+// How many times the model may act before it has to answer.
+//
+// A cap rather than a trust exercise: each pass is a real change to
+// someone's mailbox, and a loop that can't end is one that archives an
+// inbox. Three is enough for "draft a reply to Sarah and archive the
+// newsletters" and short of anything runaway.
+const MAX_TOOL_PASSES = 3;
+
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -40,6 +51,15 @@ const SYSTEM_PROMPT =
   "subjects and times rather than speaking generally. If the answer isn't " +
   "in the data provided, say so plainly instead of guessing. Never invent " +
   "emails, events, or details that aren't there. " +
+  "You can also act, using the tools you have: drafting a reply, " +
+  "archiving, and labelling. Two rules about that. First, do what was " +
+  "asked and nothing adjacent — archiving something they didn't mention " +
+  "is worse than asking. Second, when you have acted, say plainly what " +
+  "you did in one line; the change is already made and they need to know " +
+  "what to check. Everything you can do is reversible and appears in " +
+  "their activity log. If they ask for something you have no tool for — " +
+  "sending mail, deleting anything, creating a calendar event — say it " +
+  "has to be done from the dashboard rather than pretending. " +
   "Each event carries a `prep` checklist: what the user decided has to " +
   "happen before it, with `done` marking what's finished. When asked what " +
   "they need to do for an event, answer from that list — lead with the " +
@@ -136,9 +156,13 @@ export async function POST(req: NextRequest) {
   let events: EventSummary[] = [];
   let prep: Record<string, PrepItem[]> = {};
   let calendarUnavailable = false;
+  let calendarTruncated = false;
+  // Held beyond the fetch block because the tool layer needs it too — an
+  // authorized client is the one thing every action has in common.
+  let client: Awaited<ReturnType<typeof getAuthorizedClientForUser>> = null;
 
   try {
-    const client = await getAuthorizedClientForUser(userId);
+    client = await getAuthorizedClientForUser(userId);
     if (!client) {
       return NextResponse.json(
         { error: "Google not connected", code: "not_connected" },
@@ -158,8 +182,9 @@ export async function POST(req: NextRequest) {
     if (messagesResult.status === "rejected") throw messagesResult.reason;
 
     if (eventsResult.status === "fulfilled") {
-      const { events: gathered, google, apple } = eventsResult.value;
+      const { events: gathered, google, apple, truncated } = eventsResult.value;
       events = gathered;
+      calendarTruncated = truncated;
       // Only "unavailable" when neither service came through — one
       // working source still answers most questions.
       calendarUnavailable = google !== "ok" && apple !== "ok";
@@ -212,6 +237,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Narrowed once here rather than asserted at each use: the fetch block
+  // above returns early when there's no client, but TypeScript can't see
+  // that through a reassignable binding.
+  const authorized = client;
+  if (!authorized) {
+    return NextResponse.json(
+      { error: "Google not connected", code: "not_connected" },
+      { status: 400 }
+    );
+  }
+
   // Claude gets its own try/catch: the context loaded fine, so a generation
   // failure is recoverable and the UI should offer a retry rather than
   // reporting that everything broke.
@@ -225,7 +261,14 @@ export async function POST(req: NextRequest) {
       "",
       calendarUnavailable
         ? "Calendar data is unavailable — answer from email alone, and say so if the user asks about their schedule."
-        : `Upcoming events (next ${CALENDAR_DAYS} days):\n${JSON.stringify(
+        : `${
+            calendarTruncated
+              ? `This is a PARTIAL list — there are more events in the ` +
+                `next ${CALENDAR_DAYS} days than were fetched. If asked ` +
+                `about a date and you see nothing, say you can't see ` +
+                `that far rather than saying they are free.\n`
+              : ""
+          }Upcoming events (next ${CALENDAR_DAYS} days):\n${JSON.stringify(
             eventsForModel(events, prep),
             null,
             2
@@ -235,24 +278,98 @@ export async function POST(req: NextRequest) {
     ].join("\n");
 
     const anthropic = getAnthropicClient();
-    const response = await anthropic.messages.create({
-      model: CHAT_MODEL,
-      max_tokens: 4096,
-      output_config: { effort: "low" },
-      system: systemPrompt,
-      messages: history.map((m) => ({ role: m.role, content: m.content })),
-    });
 
-    const content = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("")
-      .trim();
+    // The ids the model was actually shown. Every tool checks against
+    // this, so an invented id can't reach Gmail — and a message the user
+    // never saw in this conversation can't be acted on.
+    const visibleIds = new Set(emails.map((email) => email.id));
 
-    if (!content) throw new Error("Claude returned no text content");
+    const conversation: Anthropic.MessageParam[] = history.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const performed: ActionRecord[] = [];
+    let content = "";
+
+    for (let pass = 0; pass <= MAX_TOOL_PASSES; pass += 1) {
+      // On the final pass the tools are withheld, which forces an
+      // answer instead of another action. Passing them every time meant
+      // the budget could only be spent by cutting the model off
+      // mid-sentence — after the mailbox had already been changed.
+      const lastPass = pass === MAX_TOOL_PASSES;
+      const response = await anthropic.messages.create({
+        model: CHAT_MODEL,
+        max_tokens: 4096,
+        output_config: { effort: "low" },
+        system: lastPass
+          ? systemPrompt +
+            " You have used your action budget for this turn. Do not " +
+            "attempt anything further — tell the user what you did and " +
+            "what is left."
+          : systemPrompt,
+        ...(lastPass ? {} : { tools: CHAT_TOOLS }),
+        messages: conversation,
+      });
+
+      const text = response.content
+        .filter((block) => block.type === "text")
+        .map((block) => (block.type === "text" ? block.text : ""))
+        .join("")
+        .trim();
+      if (text) content = text;
+
+      const toolUses = response.content.filter(
+        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+      );
+      if (!toolUses.length) break;
+
+      if (lastPass) {
+        // Unreachable: no tools were offered on this pass.
+        console.error("[chat] tool use returned with no tools offered");
+        break;
+      }
+
+      conversation.push({ role: "assistant", content: response.content });
+
+      const results: Anthropic.ToolResultBlockParam[] = [];
+      for (const use of toolUses) {
+        const outcome = await runChatTool(
+          use.name,
+          (use.input ?? {}) as Record<string, unknown>,
+          { userId, client: authorized, profile },
+          visibleIds
+        );
+        if (outcome.action) performed.push(outcome.action);
+        results.push({
+          type: "tool_result",
+          tool_use_id: use.id,
+          content: outcome.result,
+        });
+      }
+
+      conversation.push({ role: "user", content: results });
+    }
+
+    if (!content) {
+      // Only a real failure when nothing happened. If actions were taken,
+      // a missing summary is a presentation problem — throwing here would
+      // 503 the request and discard the receipts for changes already made
+      // to the mailbox.
+      if (!performed.length) throw new Error("Claude returned no text content");
+      content = performed.map((action) => action.summary).join("\n");
+    }
 
     return NextResponse.json({
       reply: { role: "assistant" as const, content },
+      // Surfaced separately from the prose so the UI can offer undo on
+      // each one. A model saying "I archived those" is a claim; this is
+      // the receipt.
+      actions: performed.map((action) => ({
+        id: action.id,
+        summary: action.summary,
+        undoable: action.undo !== "none",
+      })),
     });
   } catch (err: unknown) {
     console.error("Chat generation failed", errorMessage(err));

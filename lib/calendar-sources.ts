@@ -3,8 +3,13 @@ import {
   getAuthorizedClientForUser,
   hasScope,
 } from "./google";
-import { fetchUpcomingEvents } from "./calendar";
-import { AppleAuthError, fetchAppleEvents, getAppleCredentials } from "./apple";
+import { fetchUpcomingEvents, GOOGLE_MAX_EVENTS } from "./calendar";
+import {
+  APPLE_MAX_EVENTS,
+  AppleAuthError,
+  fetchAppleEvents,
+  getAppleCredentials,
+} from "./apple";
 import { mergeEvents, type EventSummary, type RawEvent } from "./events";
 import { errorMessage } from "./supabase";
 
@@ -111,14 +116,19 @@ export async function gatherEvents(
   // Merged without a cap first, so the count is known before anything is
   // discarded. Merging straight to `limit` would make a truncated list
   // indistinguishable from a complete one.
-  //
-  // Note this only sees truncation at the merge step; each source also
-  // caps its own fetch, so a calendar with more than a few hundred
-  // events in the window can still be clipped upstream without a flag.
   const merged = mergeEvents(
     [google.events, apple.events],
     Number.MAX_SAFE_INTEGER
   );
+
+  // Truncation can happen twice: here, and inside each source, which
+  // clips its own fetch before the merge ever sees it. Checking only the
+  // merge missed the worse case — one busy Google calendar with 400
+  // events in 90 days returns exactly 250, the merge is under its limit,
+  // and the card asserts a complete list with 150 events silently gone.
+  const clippedUpstream =
+    google.events.length >= GOOGLE_MAX_EVENTS ||
+    apple.events.length >= APPLE_MAX_EVENTS;
 
   return {
     // Google first on purpose: where the same meeting exists on both
@@ -127,7 +137,7 @@ export async function gatherEvents(
     events: merged.slice(0, limit),
     google: google.status,
     apple: apple.status,
-    truncated: merged.length > limit,
+    truncated: merged.length > limit || clippedUpstream,
   };
 }
 

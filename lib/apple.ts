@@ -24,7 +24,8 @@ const ICLOUD_CALDAV_URL = "https://caldav.icloud.com";
 // Guards against a pathological series (a daily event set up in 2009)
 // walking thousands of iterations before it reaches our window.
 const MAX_OCCURRENCES_PER_SERIES = 3000;
-const MAX_EVENTS = 250;
+export const APPLE_MAX_EVENTS = 250;
+const MAX_EVENTS = APPLE_MAX_EVENTS;
 // Matches the cap on the Google side — enough to know who a meeting is
 // with, not so many that a big invite list rides along everywhere.
 const MAX_ATTENDEES = 20;

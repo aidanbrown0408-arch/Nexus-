@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AppleConnectForm from "./AppleConnectForm";
 import AddEventForm from "./AddEventForm";
 import EventRow from "./EventRow";
@@ -46,6 +46,11 @@ export default function CalendarSection() {
   // value reaches a Google API call and an iCloud time-range query.
   const [days, setDays] = useState<7 | 30 | 90>(7);
   const [truncated, setTruncated] = useState(false);
+  // Switching 90 days → 7 days fires two requests, and the slower one is
+  // usually the wider one. Without this, the 90-day response could land
+  // last and paint three months of events under a "next 7 days" heading,
+  // with a truncation banner belonging to the other request.
+  const requestId = useRef(0);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [sources, setSources] = useState<Sources | null>(null);
@@ -58,6 +63,9 @@ export default function CalendarSection() {
   const [showAppleForm, setShowAppleForm] = useState(false);
 
   const fetchEvents = useCallback(async () => {
+    const id = ++requestId.current;
+    const isCurrent = () => id === requestId.current;
+
     setLoadingEvents(true);
     setEventsError(null);
     try {
@@ -67,9 +75,15 @@ export default function CalendarSection() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         if (body?.code === "not_connected") {
+          if (!isCurrent()) return;
           setStatus({ kind: "disconnected" });
           setSources({ google: "not_connected", apple: "not_connected" });
           setEvents([]);
+          // Cleared with everything else, or a disconnect leaves last
+          // session's truncation banner hanging over an empty card.
+          setTruncated(false);
+          setPrep({});
+          setGenerated(new Set());
           return;
         }
         throw new Error(body?.error ?? "Failed to load events");
@@ -81,6 +95,7 @@ export default function CalendarSection() {
         generated: string[];
         truncated?: boolean;
       };
+      if (!isCurrent()) return;
       setEvents(body.events ?? []);
       setSources(body.sources);
       setPrep(body.prep ?? {});
@@ -88,12 +103,15 @@ export default function CalendarSection() {
       setTruncated(Boolean(body.truncated));
       setStatus({ kind: "ready" });
     } catch (err) {
+      if (!isCurrent()) return;
       setEventsError(
         err instanceof Error ? err.message : "Failed to load events"
       );
       setStatus({ kind: "ready" });
     } finally {
-      setLoadingEvents(false);
+      // Only the newest request owns the spinner — a stale one finishing
+      // shouldn't say the current one is done.
+      if (isCurrent()) setLoadingEvents(false);
     }
   }, [days]);
 

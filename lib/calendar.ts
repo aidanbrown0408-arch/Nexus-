@@ -12,7 +12,8 @@ export type { EventSummary };
 // the user has switched on.
 // Matches the maxResults already asked of the API. Sized for a week, a
 // cap of 50 silently swallowed most of a 90-day window.
-const MAX_EVENTS = 250;
+export const GOOGLE_MAX_EVENTS = 250;
+const MAX_EVENTS = GOOGLE_MAX_EVENTS;
 // Enough to tell who a meeting is with when drafting its prep list.
 // A 200-person all-hands doesn't need every address carried around.
 const MAX_ATTENDEES = 20;
