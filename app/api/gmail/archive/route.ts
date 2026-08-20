@@ -6,7 +6,7 @@ import {
   GMAIL_MODIFY_SCOPE,
 } from "@/lib/google";
 import { applyLabel, archiveMessages, ensureLabel } from "@/lib/gmail";
-import { logAction } from "@/lib/actions";
+import { actionTarget, logAction } from "@/lib/actions";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         summary: `Labelled ${ids.length} message${
           ids.length === 1 ? "" : "s"
         } "${appliedLabel.name}"`,
-        target: { messageIds: ids.join(","), labelId: appliedLabel.id },
+        target: actionTarget.messages(ids, appliedLabel.id),
         undo: "remove_label",
       });
     }
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
     const action = await logAction(userId, {
       kind: "archive",
       summary: `Archived ${ids.length} message${ids.length === 1 ? "" : "s"}`,
-      target: { messageIds: ids.join(",") },
+      target: actionTarget.messages(ids),
       undo: "unarchive",
     });
 

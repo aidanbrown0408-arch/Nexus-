@@ -5,6 +5,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  // What the assistant actually changed on this turn. Attached to the
+  // message rather than kept in a separate list so the receipt stays next
+  // to the sentence that claimed it — "I archived those" is a claim, this
+  // is the thing that proves it and takes it back.
+  actions?: PerformedAction[];
+};
+
+type PerformedAction = {
+  id: string;
+  summary: string;
+  undoable: boolean;
 };
 
 type Status =
@@ -15,9 +26,58 @@ type Status =
 
 const EXAMPLE_QUESTIONS = [
   "What's blocking me this week?",
-  "Who am I waiting on a reply from?",
-  "What's on my calendar tomorrow?",
+  "Draft a reply to the newest email",
+  "Archive the newsletters",
 ];
+
+function ActionReceipts({ actions }: { actions: PerformedAction[] }) {
+  const [undone, setUndone] = useState<Set<string>>(new Set());
+  const [working, setWorking] = useState<string | null>(null);
+
+  if (!actions.length) return null;
+
+  async function undo(id: string) {
+    setWorking(id);
+    try {
+      const res = await fetch(`/api/actions/${id}/undo`, { method: "POST" });
+      if (res.ok) setUndone((current) => new Set(current).add(id));
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  return (
+    <ul className="mt-2 space-y-1 border-t border-neutral-200/70 pt-2">
+      {actions.map((action) => {
+        const isUndone = undone.has(action.id);
+        return (
+          <li
+            key={action.id}
+            className="flex items-baseline justify-between gap-3 text-xs"
+          >
+            <span
+              className={
+                isUndone ? "text-neutral-400 line-through" : "text-neutral-600"
+              }
+            >
+              {action.summary}
+            </span>
+            {action.undoable && !isUndone && (
+              <button
+                type="button"
+                onClick={() => undo(action.id)}
+                disabled={working === action.id}
+                className="shrink-0 font-medium text-neutral-500 underline underline-offset-2 transition-colors hover:text-neutral-800 disabled:opacity-60"
+              >
+                {working === action.id ? "Undoing…" : "Undo"}
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export default function ChatSection() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -46,7 +106,11 @@ export default function ChatSection() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify({ messages: next }),
+          // Strip the receipts: the API validates a strict {role, content}
+          // shape, and they're ours to render, not part of the transcript.
+          body: JSON.stringify({
+            messages: next.map(({ role, content }) => ({ role, content })),
+          }),
         });
 
         if (!res.ok) {
@@ -61,8 +125,14 @@ export default function ChatSection() {
           throw new Error(body?.error ?? "Couldn't answer that just now.");
         }
 
-        const body = (await res.json()) as { reply: ChatMessage };
-        setMessages([...next, body.reply]);
+        const body = (await res.json()) as {
+          reply: ChatMessage;
+          actions?: PerformedAction[];
+        };
+        setMessages([
+          ...next,
+          { ...body.reply, actions: body.actions ?? [] },
+        ]);
         setStatus({ kind: "idle" });
       } catch (err) {
         // Drop the unanswered question back into the input so it isn't lost,
@@ -151,6 +221,9 @@ export default function ChatSection() {
                   }
                 >
                   {message.content}
+                  {message.role === "assistant" && message.actions && (
+                    <ActionReceipts actions={message.actions} />
+                  )}
                 </div>
               </div>
             ))}

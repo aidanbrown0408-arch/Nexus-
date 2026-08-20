@@ -9,7 +9,7 @@ import {
 } from "@/lib/gmail";
 import { draftReply, MAX_INSTRUCTION_LENGTH } from "@/lib/drafts";
 import { getProfile, type UserProfileRow } from "@/lib/profile";
-import { logAction } from "@/lib/actions";
+import { actionTarget, logAction } from "@/lib/actions";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     const action = await logAction(userId, {
       kind: "draft_reply",
       summary: `Drafted a reply to ${to} about "${thread.subject}"`,
-      target: { draftId: draft.draftId, threadId: draft.threadId },
+      target: actionTarget.draft(draft.draftId, draft.threadId),
       undo: "delete_draft",
     });
 
