@@ -54,6 +54,12 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-4">
           <Link
+            href="/dashboard/activity"
+            className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
+          >
+            What Nexus has done
+          </Link>
+          <Link
             href="/dashboard/settings"
             className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
           >
