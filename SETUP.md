@@ -721,6 +721,92 @@ server's day, not theirs.
 nothing yet sends without being asked. They become real constraints when
 the brief starts being delivered rather than fetched.
 
+### 1a-septies. The brief cache
+
+The brief is the most expensive thing this app does — a model call over
+the whole inbox and calendar, twelve to twenty seconds, several cents.
+Without this table every dashboard load paid for it again, and React's
+development double-render made that twice per load.
+
+```sql
+create table if not exists brief_cache (
+  user_id text not null,
+  -- The user's calendar day in their own timezone, YYYY-MM-DD. Keyed on
+  -- their day rather than a UTC one, or the cache would expire
+  -- mid-evening for anyone west of London.
+  day text not null,
+  brief jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, day)
+);
+```
+
+No RLS policy is needed — every read and write goes through the service
+role key from a route that has already checked Clerk's session, the same
+as every other table here.
+
+**How it behaves.** A page load reads the stored brief and spends no
+model call. The **Rewrite** button calls `/api/brief?refresh=1`, which
+regenerates from current mail, calendar and markets and overwrites the
+day's row. Yesterday's rows are deleted on the next write, so there's no
+scheduled job to forget about.
+
+**The tradeoff worth knowing.** This is a whole-day cache, not a short
+TTL. Mail that arrives after the brief was written won't appear in it
+until you hit Rewrite. That's deliberate — a morning brief is a
+point-in-time artifact, and one that quietly rewrote itself every time
+the tab regained focus would be both expensive and disorienting. If that
+turns out to be wrong, the fix is a staleness check on unread count
+rather than a shorter TTL.
+
+**Four rules that keep the cache from lying.**
+
+- **A degraded brief is never stored.** If the calendar, the feeds or the
+  quotes were unavailable when it was written, it is served once and
+  regenerated next load. Cached, a 7am calendar blip would have shown
+  "your calendar wasn't available this morning" for the next seventeen
+  hours, with the calendar working fine the whole time.
+- **Quotes are refreshed on every cache hit.** The prose is timestamped
+  and stays as written; prices are the one part that goes stale in a way
+  the reader can't see, so the tiles get a fresh batched quote request —
+  itself cached five minutes — while the paragraph keeps its "Written
+  7:04 AM" label.
+- **The day is the user's day.** Keyed on `profile.timezone`, falling
+  back to the browser's zone (sent as `?tz=`) rather than the host's.
+  A UTC host would otherwise roll the key over at 5pm Pacific.
+- **Only today's row survives.** The prune deletes every day that isn't
+  today, not merely older ones — moving timezone west shifts the key
+  backwards, and an older-than prune would strand the future-dated row to
+  be served as a morning brief once the date caught up.
+
+**Still open, and deliberate.** Two serverless instances missing at the
+same instant can both generate; the in-process guard only dedupes within
+one instance, which is what a double-render or a second tab actually
+hits. A cache hit also skips the Google-connected check, so revoking
+access mid-day leaves the stored brief readable until Rewrite.
+
+### 1a-octies. Scheduled brief deliveries
+
+One row per brief actually emailed. This is the only thing standing
+between a retried or overlapping cron run and a duplicate — and an
+assistant that emails you the same brief twice is one you filter into a
+folder.
+
+```sql
+create table if not exists brief_deliveries (
+  user_id text not null,
+  day text not null,
+  sent_at timestamptz not null default now(),
+  primary key (user_id, day)
+);
+```
+
+The primary key is doing real work here: the scheduler *claims* a
+delivery by inserting before it generates anything, so if two runs
+overlap, both check, both may see nothing, and only one insert survives.
+A claim is released if generation or sending then fails, which lets the
+next hourly run try again.
+
 ## 5. Re-consenting after a scope change
 
 Google grants scopes at connect time and bakes them into the stored
@@ -762,3 +848,218 @@ back covering both scopes.
 The same applies to any scope added later: append it to `GOOGLE_SCOPES`,
 add it to the consent screen in step 2c, and existing users reconnect
 once.
+
+## 6. The scheduled morning brief
+
+Everything else in Nexus happens when you open the dashboard, which makes
+it a website you have to remember to visit. This is the part that shows
+up on its own.
+
+### 6a. What it does
+
+A cron hits `GET /api/cron/brief` **every hour**. Hourly rather than "at
+7am" because 7am is a different instant for every user — the schedule is
+per-person, read from `morning_time` and `timezone` in their profile,
+which the onboarding interview has been collecting all along and nothing
+used until now.
+
+Each run sends to whoever's morning has just arrived. The bar for putting
+something in someone's inbox unasked is high, so every guard fails toward
+silence:
+
+- Only users who **finished** the interview and chose a morning time. An
+  unfinished interview means they never picked an hour, and sending at a
+  default would be Nexus deciding to email someone who hadn't asked.
+- Only in the hour matching that time **in their zone**, plus a
+  three-hour grace window. The window is what makes failures survivable:
+  without it the schedule is a single instant, so one Anthropic 503 at
+  7am means no brief that day. It also covers the spring-forward hole —
+  a `morning_time` of 02:00 has no 2am on that date.
+- **Never without a timezone.** A morning time with no zone isn't a
+  time; guessing means emailing a Los Angeles user at midnight on a UTC
+  host and calling it their morning. Those users are skipped until they
+  set one.
+- Never twice in a day, even if the job overlaps, retries, or the
+  container restarts mid-run.
+- Never on a weekend for anyone who answered "never" to weekend contact.
+- **Never during an outage.** A brief built while the calendar or the
+  feeds were down is fine to show someone who asked for it and not fine
+  to push at them; the claim is released and the grace window catches it
+  an hour later. Note this means *outages only* — a missing
+  `TWELVE_DATA_API_KEY` is a permanent fact about the deployment, not a
+  blip, so it sends and the brief says what's missing. Treating the two
+  alike silently cancelled the brief forever for anyone who ticked
+  financial news.
+- **Never twice, even when the send is ambiguous.** A provider timeout
+  may or may not have delivered, so the duplicate guard is *kept* rather
+  than cleared. That risks one missed brief; clearing it would risk two
+  identical emails, which is the failure that gets an assistant muted.
+
+### 6b. Environment
+
+```bash
+RESEND_API_KEY=            # https://resend.com — free tier is 3,000/month
+BRIEF_FROM_EMAIL=Nexus <brief@yourdomain.com>   # domain must be verified
+CRON_SECRET=               # any long random string
+```
+
+Without `RESEND_API_KEY` and `BRIEF_FROM_EMAIL` the route answers 503 and
+sends nothing. Without a matching `CRON_SECRET` it answers 401 — that
+check is not optional, because an open route here lets a stranger make
+you pay for a model call per request.
+
+### 6c. Why not send from the user's own Gmail
+
+It would need the `gmail.send` scope, which `lib/google.ts` excludes on
+purpose. A token that can send mail as someone is a far larger thing to
+hold than one that can only draft, and widening that scope for a
+convenience is the kind of trade that's hard to walk back. A brief that
+arrives *from Nexus* is also more honest than one that appears to be from
+yourself.
+
+### 6d. Deploying the schedule
+
+`vercel.json` declares the hourly cron. Vercel reads it on deploy; there
+is nothing to configure in the dashboard. On the Hobby plan cron runs are
+once-daily and the timing is approximate, so an hourly schedule needs a
+Pro plan — on Hobby, either accept one fixed hour for everyone or point
+an external scheduler (GitHub Actions, cron-job.org) at the same URL with
+the same Bearer token.
+
+### 6e. Testing it without waiting for morning
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/brief
+```
+
+It answers with what it did — `{"due":1,"deferred":0,"outcomes":{"sent":1}}`
+— so an empty `due` tells you the hour didn't match rather than leaving
+you guessing. To force a send, set your `morning_time` to the current
+hour in settings first.
+
+`deferred` is non-zero when a run ran out of its time budget. Deliveries
+are sequential (each is a model call, and firing the whole list at once
+would spike every upstream limit at the top of the hour), so a run stops
+starting new ones with a minute to spare — being killed mid-delivery is
+the one way a user gets marked delivered without receiving anything. The
+list is sorted and then rotated by the hour, so a run that runs out
+doesn't drop the same people every single day.
+
+## 7. Tests
+
+```bash
+npm test
+```
+
+Compiles `lib/` and runs Node's built-in test runner over `tests/`.
+
+**No test framework is installed, on purpose.** Node 22 ships `node:test`
+and `node:assert`, and TypeScript is already a dependency — so the whole
+setup is one config file (`tsconfig.test.json`) and one script, with no
+new supply chain to keep patched. It also means tests run on a machine
+with no network access, which the development VM doesn't have.
+
+**Only `lib/` is compiled.** Route handlers and components need a Next.js
+runtime to mean anything; the logic worth testing was deliberately kept
+out of them. When something in a route turns out to be worth a test, the
+move is to lift it into `lib/` first — which is exactly why
+`lib/schedule.ts` exists apart from the cron route that uses it.
+
+**What's covered, and why those things.** Every case in `tests/` is a bug
+that actually happened, not a hypothetical:
+
+| File | Guards against |
+| --- | --- |
+| `vips.test.cjs` | The VIP list failing in both directions — missing "my co-founder Marcus" (the format onboarding suggests), and "Ann" protecting `announcements@` |
+| `schedule.test.cjs` | Emailing twice across midnight, skipping the day 2am doesn't exist, and treating a Friday-night retry as Saturday |
+| `rss.test.cjs` | Nine ways a real publisher's feed broke the hand-rolled parser |
+| `news-preferences.test.cjs` | A retired onboarding option silently switching news off for existing users |
+
+The bias is toward parsing and decisions — the places where being subtly
+wrong looks exactly like working correctly. There is deliberately no
+coverage of "does Supabase return a row": that tests the library, needs a
+live connection, and has never been the thing that broke.
+
+## 8. What the chat box can do
+
+Chat used to describe actions it couldn't take: a dozen working action
+routes sat beside a box that could only answer questions about them. It
+can now draft a reply, archive, and label — "draft Sarah a decline",
+"archive the newsletters", "label those Receipts".
+
+**Only reversible things, and that is the whole design.** ROADMAP.md's
+rule is that reversible actions can be batched while irreversible ones are
+always individual, always explicit, and always previewed in full. A
+conversation is not a preview, so chat gets the reversible half and
+nothing else. Absent on purpose, not by oversight:
+
+- **Sending mail.** Nexus has never held the `gmail.send` scope and this
+  is not the feature that should introduce it.
+- **Deleting or trashing.**
+- **Creating calendar events** — they notify other people, which makes
+  them irreversible in the way that matters: the invitation has already
+  arrived.
+
+Asked for one of those, it says it has to be done from the dashboard
+rather than pretending.
+
+**Three guards worth knowing.**
+
+- **It can only touch what it was shown.** Every id is checked against
+  the messages actually included in this turn's context, so an invented
+  id can't reach Gmail and a message the user never saw can't be acted
+  on.
+- **Three actions per turn, then it must answer.** On the final pass the
+  tools are withheld rather than the model being cut off mid-sentence —
+  a budget spent by truncation would leave the mailbox changed and the
+  explanation missing.
+- **Every action is logged with its undo**, and the receipt appears
+  under the message that claimed it. "I archived those" is a claim; the
+  line beneath it with an Undo button is the proof.
+
+**One trap, since it cost a bug already.** An action's `target` is a
+`Record<string, string>`, so the compiler cannot tell `ids` from
+`messageIds` — and chat's archive tool wrote the wrong one. Every Undo it
+offered answered 422, and the button reported nothing. Writers and the
+undo route now share `actionTarget` / `readMessageIds` in `lib/actions.ts`
+and `tests/action-targets.test.cjs` holds the two ends together. If you
+add an action kind, go through those helpers rather than writing the keys
+by hand.
+
+## 9. The activity page
+
+`/dashboard/activity` — everything Nexus has changed on the account,
+newest first, grouped by day, with Undo on anything reversible.
+
+The action log and `POST /api/actions/[id]/undo` were both built long
+before this page. Without it the log was a table nobody could look at and
+the undo needed an id and a curl, which meant the trust the log was
+written to buy was sitting in Supabase where no user could see it.
+
+It matters more since chat gained tools. Actions used to come from
+buttons, so a user always knew what had happened; now one sentence can
+change three things and a conversation scrolls away.
+
+**Design notes worth keeping.**
+
+- **`target` is not sent to the browser.** It holds Gmail message and
+  draft ids, filter ids, CalDAV object URLs and a full event snapshot —
+  everything needed to act on a mailbox. The page needs to name what
+  happened and offer the undo, and nothing more. Note this doesn't make
+  the page insensitive: `summary` legitimately contains recipient
+  addresses, subject lines and event titles, because a log that says
+  "archived 4 messages" without saying which is not an audit trail.
+- **Undo is claimed before it runs.** The read and the reversal aren't
+  atomic, so two clicks on a slow undo both saw it un-undone and both
+  reversed it — and `restore_event` run twice means two calendar events
+  and a second invitation to every guest. A conditional update on
+  `undone_at is null` is the lock; any non-success hands the claim back
+  so a real failure stays retryable.
+- **A restored event says it's a new one.** The undo route has always
+  flagged `recreated`; the page now shows it, because presenting it as a
+  clean reversal would claim the guests' copies and any prep checklist
+  came back, and they didn't.
+- **A 422 removes the button.** That status means the action was never
+  structurally reversible — nothing recorded to act on, or a kind the
+  undo route doesn't handle. Clicking again can't help, so the row says
+  so instead of inviting a retry that fails forever.
