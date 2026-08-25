@@ -202,7 +202,7 @@ export default function AddEventForm({ onCreated }: Props) {
 
   if (created) {
     return (
-      <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+      <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
         <div className="flex flex-wrap items-center gap-2">
           {/* Naming the calendar is the confirmation that matters — it's
               the one thing the user can't see from the Upcoming list,
@@ -258,7 +258,7 @@ export default function AddEventForm({ onCreated }: Props) {
   return (
     <form
       onSubmit={submit}
-      className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3"
+      className="mt-3 rounded-xl border border-line bg-surface-soft p-3"
     >
       <input
         type="text"
@@ -267,7 +267,7 @@ export default function AddEventForm({ onCreated }: Props) {
         placeholder="What is it?"
         maxLength={200}
         autoFocus
-        className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -275,7 +275,7 @@ export default function AddEventForm({ onCreated }: Props) {
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+          className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
         />
         {!allDay && (
           <>
@@ -283,14 +283,14 @@ export default function AddEventForm({ onCreated }: Props) {
               type="time"
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+              className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
             />
             <span className="text-sm text-neutral-500">to</span>
             <input
               type="time"
               value={endTime}
               onChange={(e) => setEndTime(e.target.value)}
-              className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+              className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
             />
           </>
         )}
@@ -339,7 +339,7 @@ export default function AddEventForm({ onCreated }: Props) {
         value={location}
         onChange={(e) => setLocation(e.target.value)}
         placeholder="Where? (optional)"
-        className="mt-2 w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       />
 
       <GuestPicker
@@ -352,7 +352,7 @@ export default function AddEventForm({ onCreated }: Props) {
       <select
         value={target}
         onChange={(e) => setTarget(e.target.value)}
-        className="mt-2 w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
         <option value="">
           {loadingTargets ? "Loading calendars…" : "Which calendar?"}
@@ -387,14 +387,14 @@ export default function AddEventForm({ onCreated }: Props) {
       )}
 
       {guestsUnsupported && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        <p className="mt-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
           Nexus can&apos;t send invitations through iCloud. Pick a Google
           calendar, or clear the guest list.
         </p>
       )}
 
       {error && (
-        <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
+        <p className="mt-2 rounded-xl bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
           {error}{" "}
           {needsReconnect && (
             <a href="/api/google/connect" className="font-medium underline">
@@ -426,7 +426,7 @@ export default function AddEventForm({ onCreated }: Props) {
             setOpen(false);
             reset();
           }}
-          className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+          className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
         >
           Cancel
         </button>

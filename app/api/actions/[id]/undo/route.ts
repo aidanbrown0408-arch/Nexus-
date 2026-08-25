@@ -16,7 +16,12 @@ import {
   restoreEvent,
   type EventSnapshot,
 } from "@/lib/calendar-write";
-import { deleteAppleEvent, getAppleCredentials } from "@/lib/apple";
+import {
+  createAppleEvent,
+  deleteAppleEvent,
+  getAppleCredentials,
+  type AppleEventSnapshot,
+} from "@/lib/apple";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -266,6 +271,44 @@ async function reverse(
             { status: 422 }
           );
         }
+
+        // An Apple deletion snapshots the .ics fields rather than a
+        // Google-shaped EventSnapshot (no attendees, no recurrence — see
+        // snapshotAppleEvent), so it gets its own restore path back
+        // through createAppleEvent rather than restoreEvent.
+        if (action.target.source === "apple") {
+          let snapshot: AppleEventSnapshot;
+          try {
+            snapshot = JSON.parse(raw) as AppleEventSnapshot;
+          } catch {
+            return NextResponse.json(
+              { error: "That action's saved copy of the event is unreadable." },
+              { status: 422 }
+            );
+          }
+          const credentials = await getAppleCredentials(userId);
+          if (!credentials) {
+            return NextResponse.json(
+              { error: "Apple Calendar not connected", code: "not_connected" },
+              { status: 400 }
+            );
+          }
+          const restored = await createAppleEvent(credentials, {
+            calendarUrl: snapshot.calendarUrl,
+            summary: snapshot.summary,
+            start: snapshot.start,
+            end: snapshot.end,
+            allDay: snapshot.allDay,
+            location: snapshot.location ?? undefined,
+            description: snapshot.description ?? undefined,
+          });
+          return NextResponse.json({
+            ok: true,
+            recreated: true,
+            eventId: restored.uid,
+          });
+        }
+
         let snapshot: EventSnapshot;
         try {
           snapshot = JSON.parse(raw) as EventSnapshot;

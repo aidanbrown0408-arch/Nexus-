@@ -25,9 +25,15 @@ type Props = {
   // `seriesId` is passed when a whole repeating series went, so the
   // parent can clear every occurrence rather than one row.
   onDeleted: (eventKey: string, seriesId?: string) => void;
+  // Fired once the server confirms an edit, so the parent can patch its
+  // copy of the event in place — not optimistic, for the same reason
+  // deleting isn't: the fields shown are the fields on the calendar, and
+  // showing an edit that didn't actually save would be worse than a
+  // one-beat delay.
+  onUpdated: (eventKey: string, fields: Partial<EventSummary>) => void;
 };
 
-function formatDay(iso: string): string {
+export function formatDay(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
@@ -56,6 +62,22 @@ function formatTimeRange(event: EventSummary): string {
   return `${time(start)} – ${time(end)}`;
 }
 
+// Local date/time strings for the edit form's inputs — always the
+// browser's own zone, the same convention AddEventForm uses.
+function toDateInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function toTimeInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "00:00";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function EventRow({
   event,
   items,
@@ -64,6 +86,7 @@ export default function EventRow({
   onGenerated,
   showCalendarName,
   onDeleted,
+  onUpdated,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -80,13 +103,92 @@ export default function EventRow({
   // Delete on a single row most often means.
   const [deleteScope, setDeleteScope] = useState<"one" | "series">("one");
 
+  // --- edit form state ------------------------------------------------
+  const [editing, setEditing] = useState(false);
+  const [editSummary, setEditSummary] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editAllDay, setEditAllDay] = useState(false);
+  const [editLocation, setEditLocation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const repeats = Boolean(event.recurringEventId);
 
-  // Apple events reach us over CalDAV, which has no write path here.
-  const deletable = event.source === "google" && Boolean(event.calendarId);
+  // What Nexus can actually write to. Google events need a calendar id;
+  // Apple events need both the calendar's collection URL (also carried
+  // in calendarId — see lib/events.ts) and the event's own CalDAV object
+  // URL, since that's what a delete or an update is addressed to.
+  const writable =
+    event.source === "google"
+      ? Boolean(event.calendarId)
+      : Boolean(event.calendarId && event.objectUrl);
 
   const done = items.filter((item) => item.done).length;
   const allReady = items.length > 0 && done === items.length;
+
+  function openEdit() {
+    setEditSummary(event.summary);
+    setEditDate(toDateInput(event.start));
+    setEditStartTime(toTimeInput(event.start));
+    setEditEndTime(toTimeInput(event.end));
+    setEditAllDay(event.allDay);
+    setEditLocation(event.location ?? "");
+    setEditError(null);
+    setEditing(true);
+    setConfirmingDelete(false);
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editSummary.trim()) return;
+
+    setSaving(true);
+    setEditError(null);
+
+    const start = editAllDay ? editDate : `${editDate}T${editStartTime}`;
+    const end = editAllDay ? editDate : `${editDate}T${editEndTime}`;
+
+    try {
+      const body: Record<string, unknown> = {
+        summary: editSummary.trim(),
+        start,
+        end,
+        allDay: editAllDay,
+        location: editLocation.trim() || undefined,
+        source: event.source,
+        calendarId: event.calendarId,
+      };
+      if (event.source === "apple") body.objectUrl = event.objectUrl;
+
+      const res = await fetch(
+        `/api/calendar/events/${encodeURIComponent(event.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      const resBody = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resBody?.error ?? "Couldn't save that change");
+
+      onUpdated(event.key, {
+        summary: editSummary.trim(),
+        start,
+        end,
+        allDay: editAllDay,
+        location: editLocation.trim() || null,
+      });
+      setEditing(false);
+    } catch (err) {
+      setEditError(
+        err instanceof Error ? err.message : "Couldn't save that change"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function toggleItem(item: PrepItem) {
     const next = items.map((i) =>
@@ -189,10 +291,14 @@ export default function EventRow({
 
     try {
       const params = new URLSearchParams({
+        source: event.source,
         calendarId: event.calendarId ?? "",
         notifyGuests: String(notifyGuests),
         scope: repeats ? deleteScope : "one",
       });
+      if (event.source === "apple" && event.objectUrl) {
+        params.set("objectUrl", event.objectUrl);
+      }
       if (repeats && event.recurringEventId) {
         params.set("seriesId", event.recurringEventId);
       }
@@ -225,32 +331,29 @@ export default function EventRow({
   }
 
   return (
-    <li className="py-3">
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-            event.source === "apple" ? "bg-neutral-800" : "bg-indigo-500"
-          }`}
-        />
+    <li className="flex gap-3 rounded-card border border-line-soft bg-surface-soft p-3">
+      {/* The source stripe. Google and iCloud events are the same shape,
+          so colour is the only thing telling them apart at a glance. */}
+      <span
+        aria-hidden
+        className={`w-[3px] shrink-0 rounded-full ${
+          event.source === "apple" ? "bg-amber-700/70" : "bg-accent-600"
+        }`}
+      />
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="truncate text-sm font-medium text-neutral-900">
-              {event.summary}
-            </p>
-            <span className="shrink-0 text-xs text-neutral-400">
-              {formatDay(event.start)}
-            </span>
-          </div>
-          <p className="mt-0.5 text-sm text-neutral-600">
+          <p className="font-mono text-[11px] tracking-[0.04em] text-ink-wisp">
             {formatTimeRange(event)}
+          </p>
+          <p className="mt-1 truncate text-sm font-semibold tracking-tight text-ink">
+            {event.summary}
           </p>
 
           {(event.location ||
             event.attendeeCount > 0 ||
             repeats ||
             (showCalendarName && event.calendarName)) && (
-            <p className="mt-0.5 truncate text-xs text-neutral-500">
+            <p className="mt-1 truncate text-[13px] text-ink-ghost">
               {[
                 event.location,
                 event.attendeeCount > 0
@@ -269,13 +372,13 @@ export default function EventRow({
             </p>
           )}
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-3">
+          <div className="mt-2 flex flex-wrap items-center gap-2.5">
             {event.hangoutLink && (
               <a
                 href={event.hangoutLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                className="text-[13px] font-medium text-accent-600 transition-colors hover:text-accent-800"
               >
                 Join meeting
               </a>
@@ -284,12 +387,12 @@ export default function EventRow({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className={`rounded-full px-2 py-0.5 text-xs font-medium transition-colors ${
+              className={`rounded-full px-2.5 py-[3px] text-[11px] font-medium transition-colors ${
                 allReady
-                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  ? "bg-emerald-100/70 text-emerald-800 hover:bg-emerald-100"
                   : items.length
-                    ? "bg-amber-50 text-amber-800 hover:bg-amber-100"
-                    : "text-neutral-500 hover:text-neutral-800"
+                    ? "bg-amber-100/70 text-amber-800 hover:bg-amber-100"
+                    : "bg-surface-sunken text-ink-muted hover:text-ink"
               }`}
               aria-expanded={expanded}
             >
@@ -304,16 +407,123 @@ export default function EventRow({
                     : "Prep"}
             </button>
 
-            {deletable && !confirmingDelete && (
+            {writable && !editing && !confirmingDelete && (
+              <button
+                type="button"
+                onClick={openEdit}
+                className="text-[11px] text-ink-wisp transition-colors hover:text-ink"
+              >
+                Edit
+              </button>
+            )}
+
+            {writable && !editing && !confirmingDelete && (
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
-                className="text-xs text-neutral-400 transition-colors hover:text-red-600"
+                className="text-[11px] text-ink-wisp transition-colors hover:text-danger"
               >
                 Delete
               </button>
             )}
           </div>
+
+          {editing && (
+            <form
+              onSubmit={saveEdit}
+              className="mt-2 rounded-xl border border-line bg-surface-soft p-3"
+            >
+              <input
+                type="text"
+                value={editSummary}
+                onChange={(e) => setEditSummary(e.target.value)}
+                placeholder="What is it?"
+                maxLength={200}
+                className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+                />
+                {!editAllDay && (
+                  <>
+                    <input
+                      type="time"
+                      value={editStartTime}
+                      onChange={(e) => setEditStartTime(e.target.value)}
+                      className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <span className="text-sm text-neutral-500">to</span>
+                    <input
+                      type="time"
+                      value={editEndTime}
+                      onChange={(e) => setEditEndTime(e.target.value)}
+                      className="rounded-xl border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </>
+                )}
+                <label className="flex items-center gap-1.5 text-sm text-neutral-700">
+                  <input
+                    type="checkbox"
+                    checked={editAllDay}
+                    onChange={(e) => setEditAllDay(e.target.checked)}
+                  />
+                  All day
+                </label>
+              </div>
+
+              <input
+                type="text"
+                value={editLocation}
+                onChange={(e) => setEditLocation(e.target.value)}
+                placeholder="Where? (optional)"
+                className="mt-2 w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+
+              {repeats && (
+                <p className="mt-2 text-xs text-neutral-500">
+                  This repeats. Saving changes the whole series — Nexus
+                  doesn&apos;t support editing a single occurrence yet.
+                </p>
+              )}
+
+              {event.attendeeCount > 0 && (
+                <p className="mt-2 text-xs text-neutral-500">
+                  {event.attendeeCount} other{" "}
+                  {event.attendeeCount === 1 ? "person is" : "people are"} on
+                  this event. Guests aren&apos;t notified of edits.
+                </p>
+              )}
+
+              {editError && (
+                <p className="mt-2 rounded-xl bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
+                  {editError}
+                </p>
+              )}
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={saving || !editSummary.trim()}
+                  className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  disabled={saving}
+                  className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
 
           {confirmingDelete && (
             <div className="mt-2 rounded-xl border border-red-200 bg-red-50 p-3">
@@ -321,7 +531,7 @@ export default function EventRow({
                 Delete “{event.summary}”?
               </p>
 
-              {repeats && (
+              {repeats && event.source === "google" && (
                 <div className="mt-2 space-y-1">
                   <label className="flex items-center gap-2 text-xs text-red-900">
                     <input
@@ -346,6 +556,13 @@ export default function EventRow({
                 </div>
               )}
 
+              {repeats && event.source === "apple" && (
+                <p className="mt-1 text-xs text-red-800">
+                  This repeats. Deleting it removes every occurrence —
+                  Nexus can&apos;t take just one from an iCloud series.
+                </p>
+              )}
+
               {event.attendeeCount > 0 ? (
                 <>
                   <p className="mt-1 text-xs text-red-800">
@@ -353,18 +570,21 @@ export default function EventRow({
                     {event.attendeeCount === 1 ? "person is" : "people are"} on
                     this event.
                   </p>
-                  <label className="mt-2 flex items-start gap-2 text-xs text-red-900">
-                    <input
-                      type="checkbox"
-                      checked={notifyGuests}
-                      onChange={(e) => setNotifyGuests(e.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      Email them a cancellation. Leave this off and the event
-                      just disappears from your calendar — they keep theirs.
-                    </span>
-                  </label>
+                  {event.source === "google" && (
+                    <label className="mt-2 flex items-start gap-2 text-xs text-red-900">
+                      <input
+                        type="checkbox"
+                        checked={notifyGuests}
+                        onChange={(e) => setNotifyGuests(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Email them a cancellation. Leave this off and the
+                        event just disappears from your calendar — they
+                        keep theirs.
+                      </span>
+                    </label>
+                  )}
                 </>
               ) : (
                 <p className="mt-1 text-xs text-red-800">
@@ -381,7 +601,7 @@ export default function EventRow({
                 >
                   {deleting
                     ? "Deleting…"
-                    : repeats && deleteScope === "series"
+                    : repeats && event.source === "google" && deleteScope === "series"
                       ? "Delete the series"
                       : "Delete it"}
                 </button>
@@ -404,7 +624,7 @@ export default function EventRow({
           )}
 
           {expanded && (
-            <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+            <div className="mt-3 rounded-xl border border-line bg-surface-soft p-3">
               {items.length > 0 && (
                 <ul className="space-y-1.5">
                   {items.map((item) => (
@@ -451,12 +671,12 @@ export default function EventRow({
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="Add something to do first…"
-                  className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="min-w-0 flex-1 rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <button
                   type="submit"
                   disabled={!newTitle.trim()}
-                  className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Add
                 </button>

@@ -189,7 +189,7 @@ export default function ActivityList() {
     return (
       <div className="mt-6 space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-4 animate-pulse rounded bg-neutral-100" />
+          <div key={i} className="h-4 animate-pulse rounded bg-surface-sunken" />
         ))}
       </div>
     );
@@ -202,7 +202,7 @@ export default function ActivityList() {
         <button
           type="button"
           onClick={load}
-          className="mt-3 rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+          className="mt-3 rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
         >
           Try again
         </button>
@@ -224,10 +224,10 @@ export default function ActivityList() {
     <div className="mt-6 space-y-8">
       {groupByDay(status.actions).map((group) => (
         <section key={group.day}>
-          <h2 className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+          <h2 className="nx-label">
             {group.day}
           </h2>
-          <ul className="mt-2 divide-y divide-neutral-100 border-t border-neutral-100">
+          <ul className="mt-2 divide-y divide-line-soft border-t border-line-soft">
             {group.actions.map((action) => {
               const undone = Boolean(action.undoneAt);
               return (
@@ -270,7 +270,7 @@ export default function ActivityList() {
                         type="button"
                         onClick={() => undo(action.id)}
                         disabled={undoing.has(action.id)}
-                        className="shrink-0 rounded-full border border-neutral-200 px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-60"
+                        className="shrink-0 rounded-full border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
                       >
                         {undoing.has(action.id) ? "Undoing…" : "Undo"}
                       </button>

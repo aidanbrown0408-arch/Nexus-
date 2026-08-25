@@ -108,7 +108,7 @@ export default function DraftReply({
         </p>
 
         {note && (
-          <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+          <p className="mt-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
             {note}
           </p>
         )}
@@ -126,7 +126,7 @@ export default function DraftReply({
             type="button"
             onClick={() => discard(actionId)}
             disabled={discarding}
-            className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-60"
+            className="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
           >
             {discarding ? "Discarding…" : "Discard"}
           </button>
@@ -141,7 +141,7 @@ export default function DraftReply({
   return (
     <div className="mt-2">
       {state.kind === "error" && (
-        <p className="mb-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
+        <p className="mb-2 rounded-xl bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
           {state.message}{" "}
           {state.needsReconnect && (
             <a href="/api/google/connect" className="font-medium underline">
@@ -161,7 +161,7 @@ export default function DraftReply({
           }}
           maxLength={500}
           placeholder="Optional: decline politely, ask for the deck…"
-          className="mb-2 w-full rounded-lg border border-neutral-200 px-2.5 py-1.5 text-xs text-neutral-800 outline-none focus:border-indigo-300"
+          className="mb-2 w-full rounded-xl border border-line px-2.5 py-1.5 text-xs text-neutral-800 outline-none focus:border-indigo-300"
         />
       )}
 
@@ -170,7 +170,7 @@ export default function DraftReply({
           type="button"
           onClick={generate}
           disabled={state.kind === "drafting"}
-          className="rounded-full border border-neutral-200 px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-full border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state.kind === "drafting" ? "Drafting…" : "Draft reply"}
         </button>

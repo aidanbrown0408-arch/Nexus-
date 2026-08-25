@@ -20,11 +20,18 @@ export type EventSummary = {
   // The calendar the event lives on ("Work", "Family"), when the source
   // gives us a usable name. Null when it doesn't.
   calendarName: string | null;
-  // Which calendar to address a write to. Google needs this on every
-  // mutation — the event id alone doesn't say where the event lives, and
-  // guessing "primary" would fail on every secondary calendar. Null for
-  // Apple events, which have no write path here.
+  // Which calendar to address a write to. On Google this is the calendar
+  // id; on Apple it's the CalDAV collection URL. Both mutations (update,
+  // delete) need it to find the right calendar before they can touch the
+  // event. Null when the event didn't come with one — an event Nexus
+  // can't write to.
   calendarId: string | null;
+  // The CalDAV object URL for this event's .ics resource. Apple-only —
+  // this is what actually addresses a single event for update or delete
+  // over CalDAV, since `id` there is just the iCalendar UID and doesn't
+  // resolve to a resource on its own. Null for Google events, which are
+  // addressed by `id` + `calendarId` instead.
+  objectUrl: string | null;
   // For one occurrence of a repeating event, the id of the series it
   // belongs to. Null on one-off events. This is what lets the delete
   // confirm ask "just this one, or all of them?" — without it every

@@ -130,7 +130,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
       <select
         value={preset}
         onChange={(e) => emitPreset(e.target.value as Preset)}
-        className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
       >
         <option value="none">Doesn&apos;t repeat</option>
         <option value="daily">Every day</option>
@@ -142,7 +142,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
       </select>
 
       {preset === "custom" && (
-        <div className="mt-2 rounded-lg border border-neutral-200 bg-neutral-50 p-2.5">
+        <div className="mt-2 rounded-xl border border-line bg-surface-soft p-2.5">
           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-700">
             <span>Every</span>
             <input
@@ -158,7 +158,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                 setInterval(n);
                 emitCustom({ interval: n });
               }}
-              className="w-14 rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+              className="w-14 rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
             />
             <select
               value={frequency}
@@ -167,7 +167,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                 setFrequency(f);
                 emitCustom({ frequency: f });
               }}
-              className="rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+              className="rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
             >
               <option value="daily">days</option>
               <option value="weekly">weeks</option>
@@ -187,7 +187,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                   className={`h-7 w-7 rounded-full text-xs font-medium transition-colors ${
                     byDay.includes(d.code)
                       ? "bg-indigo-600 text-white"
-                      : "border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-100"
+                      : "border border-neutral-300 bg-white text-neutral-600 hover:bg-surface-sunken"
                   }`}
                 >
                   {d.label}
@@ -205,7 +205,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                 setEndMode(mode);
                 emitCustom({ endMode: mode });
               }}
-              className="rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+              className="rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
             >
               <option value="never">never</option>
               <option value="count">after…</option>
@@ -227,7 +227,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                     setCount(n);
                     emitCustom({ count: n });
                   }}
-                  className="w-16 rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+                  className="w-16 rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
                 />
                 <span>times</span>
               </>
@@ -241,7 +241,7 @@ export default function RepeatPicker({ startDate, value, onChange }: Props) {
                   setUntil(e.target.value);
                   emitCustom({ until: e.target.value });
                 }}
-                className="rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+                className="rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
               />
             )}
           </div>

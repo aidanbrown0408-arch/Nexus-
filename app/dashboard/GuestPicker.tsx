@@ -186,11 +186,11 @@ export default function GuestPicker({
             ? (disabledHint ?? "Guests unavailable")
             : "Invite someone — name or email"
         }
-        className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-neutral-100 disabled:text-neutral-400"
+        className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-surface-sunken disabled:text-neutral-400"
       />
 
       {!disabled && (suggestions.length > 0 || typedIsAddable) && (
-        <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-neutral-200 bg-white shadow-lg">
+        <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-line bg-white shadow-lg">
           {suggestions.map((contact, i) => (
             <li key={contact.email}>
               <button
@@ -198,7 +198,7 @@ export default function GuestPicker({
                 onClick={() => add(contact)}
                 onMouseEnter={() => setHighlight(i)}
                 className={`flex w-full flex-col items-start px-3 py-1.5 text-left transition-colors ${
-                  i === highlight ? "bg-indigo-50" : "hover:bg-neutral-50"
+                  i === highlight ? "bg-indigo-50" : "hover:bg-surface-soft"
                 }`}
               >
                 <span className="text-sm text-neutral-900">{contact.name}</span>
@@ -218,13 +218,13 @@ export default function GuestPicker({
             !suggestions.some(
               (s) => s.email.toLowerCase() === query.trim().toLowerCase()
             ) && (
-              <li className="border-t border-neutral-100">
+              <li className="border-t border-line-soft">
                 <button
                   type="button"
                   onClick={() =>
                     add({ name: query.trim(), email: query.trim() })
                   }
-                  className="w-full px-3 py-1.5 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-50"
+                  className="w-full px-3 py-1.5 text-left text-sm text-neutral-700 transition-colors hover:bg-surface-soft"
                 >
                   Invite <span className="font-medium">{query.trim()}</span>
                 </button>

@@ -100,8 +100,8 @@ export default function MemoryList() {
   if (status.kind === "loading") {
     return (
       <div className="mt-8 space-y-3">
-        <div className="h-16 w-full animate-pulse rounded-2xl bg-neutral-100" />
-        <div className="h-16 w-full animate-pulse rounded-2xl bg-neutral-100" />
+        <div className="h-16 w-full animate-pulse rounded-2xl bg-surface-sunken" />
+        <div className="h-16 w-full animate-pulse rounded-2xl bg-surface-sunken" />
       </div>
     );
   }
@@ -116,7 +116,7 @@ export default function MemoryList() {
 
   if (!status.facts.length) {
     return (
-      <div className="mt-8 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+      <div className="mt-8 rounded-panel border border-line bg-white p-6">
         <p className="text-sm text-neutral-600">
           Nothing yet. Nexus takes notes while it writes your morning
           brief, so this fills in over the first few days — and stays
@@ -133,7 +133,7 @@ export default function MemoryList() {
         return (
           <li
             key={fact.id}
-            className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+            className="rounded-2xl border border-line bg-white p-4"
           >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">

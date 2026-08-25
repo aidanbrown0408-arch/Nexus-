@@ -192,7 +192,7 @@ export default function OnboardingFlow() {
   return (
     <Shell>
       <div className="mb-6 flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+        <p className="nx-label">
           {step.section.optional ? step.section.title : "Getting set up"}
         </p>
         <p className="text-xs text-neutral-400">
@@ -202,7 +202,7 @@ export default function OnboardingFlow() {
 
       <div
         aria-hidden
-        className="mb-8 h-1 w-full overflow-hidden rounded-full bg-neutral-100"
+        className="mb-8 h-1 w-full overflow-hidden rounded-full bg-surface-sunken"
       >
         <div
           className="h-full rounded-full bg-indigo-500 transition-all duration-300"
@@ -312,7 +312,7 @@ function QuestionScreen({
               if (e.key === "Enter") submit();
             }}
             placeholder={question.placeholder}
-            className="w-full rounded-xl border border-neutral-200 px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
           />
         )}
 
@@ -322,7 +322,7 @@ function QuestionScreen({
             type="time"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="rounded-xl border border-neutral-200 px-4 py-3 text-base text-neutral-900 outline-none transition-colors focus:border-indigo-400"
+            className="rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors focus:border-indigo-400"
           />
         )}
 
@@ -333,7 +333,7 @@ function QuestionScreen({
             onChange={(e) => setText(e.target.value)}
             rows={question.kind === "list" ? 4 : 3}
             placeholder={question.placeholder}
-            className="w-full resize-none rounded-xl border border-neutral-200 px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full resize-none rounded-xl border border-line px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
           />
         )}
 
@@ -349,7 +349,7 @@ function QuestionScreen({
                   className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
-                      : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                      : "border-line text-neutral-700 hover:bg-surface-soft"
                   }`}
                 >
                   {option.label}
@@ -364,7 +364,7 @@ function QuestionScreen({
                 value={other}
                 onChange={(e) => setOther(e.target.value)}
                 placeholder="What field is it?"
-                className="w-full rounded-xl border border-neutral-200 px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+                className="w-full rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
               />
             )}
           </div>
@@ -388,7 +388,7 @@ function QuestionScreen({
                   className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
-                      : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                      : "border-line text-neutral-700 hover:bg-surface-soft"
                   }`}
                 >
                   {option.label}
@@ -477,7 +477,7 @@ function OfferScreen({
               className={`flex w-full items-start justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
                 selected
                   ? "border-indigo-400 bg-indigo-50"
-                  : "border-neutral-200 hover:bg-neutral-50"
+                  : "border-line hover:bg-surface-soft"
               }`}
             >
               <span>
@@ -532,7 +532,7 @@ function OfferScreen({
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex min-h-screen items-center justify-center px-6 py-12">
-      <div className="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-line bg-white p-8">
         {children}
       </div>
     </main>
@@ -542,7 +542,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 function SaveWarning({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
-    <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+    <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
       Couldn&apos;t save that one — you can keep going and set it later from
       settings.
     </p>

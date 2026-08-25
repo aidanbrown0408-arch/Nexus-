@@ -1,16 +1,12 @@
-import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { currentUser, auth } from "@clerk/nextjs/server";
 import { hasSeenOnboarding } from "@/lib/profile";
 import { errorMessage } from "@/lib/supabase";
-import BriefSection from "./BriefSection";
-import ChatSection from "./ChatSection";
-import GmailSection from "./GmailSection";
+import Board from "./Board";
 import TriageSection from "./TriageSection";
 import FiltersSection from "./FiltersSection";
-import CalendarSection from "./CalendarSection";
 
 // This page is user-specific (shows the signed-in user's name), so it
 // should never be statically prerendered at build time.
@@ -41,59 +37,69 @@ export default async function DashboardPage() {
   }
   if (!seen) redirect("/onboarding");
 
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+
   return (
-    <main className="flex min-h-screen flex-col items-center px-6 py-12">
-      <div className="flex w-full max-w-2xl items-center justify-between rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">
-            Welcome, {user?.firstName ?? "there"}
-          </h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            This is your Nexus dashboard.
-          </p>
+    <main className="mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-6">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-line py-6">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-lg font-semibold tracking-tight">Nexus</span>
+          <span className="nx-label whitespace-nowrap">{today}</span>
         </div>
-        <div className="flex items-center gap-4">
-          <Link
-            href="/dashboard/activity"
-            className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
-          >
-            What Nexus has done
-          </Link>
-          <Link
-            href="/dashboard/memory"
-            className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
-          >
-            What Nexus remembers
-          </Link>
-          <Link
-            href="/dashboard/settings"
-            className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
-          >
-            What Nexus knows about you
-          </Link>
+
+        <div className="flex items-center gap-3.5">
+          <nav className="hidden items-center gap-3.5 md:flex">
+            <Link
+              href="/dashboard/activity"
+              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
+            >
+              Activity
+            </Link>
+            <Link
+              href="/dashboard/memory"
+              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
+            >
+              Memory
+            </Link>
+            <Link
+              href="/dashboard/settings"
+              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
+            >
+              Settings
+            </Link>
+          </nav>
           <UserButton
             afterSignOutUrl="/"
-            appearance={{ elements: { userButtonAvatarBox: "h-10 w-10" } }}
+            appearance={{ elements: { userButtonAvatarBox: "h-8 w-8" } }}
           />
         </div>
-      </div>
+      </header>
 
-      <BriefSection />
+      {/* The board. Inbox on the left, the assistant in the middle with
+          the morning brief folded underneath it, calendar on the right —
+          the three-column arrangement from the design canvas. Below the
+          lg breakpoint it stacks, assistant first, since on a phone the
+          thing you came to do is talk to it. Either side panel can also
+          go full screen, which is state Board owns since it has to
+          reshape all three columns at once. */}
+      <Board />
 
-      <ChatSection />
-
-      <Suspense fallback={null}>
-        <GmailSection />
-      </Suspense>
-
-      {/* Tidy up before Filters: archiving is the reversible, one-off
-          version of the same instinct, and it's the one most people
-          should reach for first. */}
-      <TriageSection />
-
-      <FiltersSection />
-
-      <CalendarSection />
+      {/* Tidying and filters have no home on the canvas board, so they
+          live behind a disclosure under it rather than competing with the
+          three panels for space. */}
+      <details className="group shrink-0 pb-6">
+        <summary className="nx-label cursor-pointer list-none text-center transition-colors hover:text-ink">
+          Inbox housekeeping
+        </summary>
+        <div className="flex flex-col items-center gap-4 pt-4">
+          <TriageSection />
+          <FiltersSection />
+        </div>
+      </details>
     </main>
   );
 }

@@ -26,6 +26,7 @@ type Brief = {
   priorities: Priority[];
   scheduleNote: string;
   calendarUnavailable?: boolean;
+  mailUnavailable?: boolean;
   newsHighlights?: NewsHighlight[];
   situation?: string;
   newsUnavailable?: "fetch_failed";
@@ -76,7 +77,7 @@ function QuoteTile({ quote }: { quote: Quote }) {
 
   return (
     <div className="min-w-[104px]">
-      <p className="text-[11px] uppercase tracking-wide text-neutral-400">
+      <p className="nx-label">
         {quote.label}
       </p>
       <p className="mt-0.5 text-sm font-medium tabular-nums text-neutral-800">
@@ -139,6 +140,10 @@ function formatGeneratedAt(iso: string): string {
 export default function BriefSection() {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
+  // Collapsed by default: the canvas gives the brief one quiet bar under
+  // the assistant, and only opens it when asked, so the orb keeps the
+  // middle of the screen.
+  const [open, setOpen] = useState(false);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
   // `regenerate` is the difference between "show me the brief" and "spend
@@ -205,22 +210,37 @@ export default function BriefSection() {
   const connectHref = "/api/google/connect";
 
   return (
-    <section className="mt-8 w-full max-w-2xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-neutral-900">
-            Morning Brief
-          </h2>
-          <p className="text-sm text-neutral-500">
-            What needs you today, across mail and calendar.
-            {generatedAt && (
-              <span className="text-neutral-400">
-                {" "}
-                Written {formatGeneratedAt(generatedAt)}.
-              </span>
-            )}
-          </p>
-        </div>
+    <section
+      className={
+        "w-full shrink-0 overflow-y-auto rounded-panel transition-colors " +
+        (open ? "border border-line bg-white p-5" : "bg-surface-muted p-4")
+      }
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-center gap-3 text-ink"
+      >
+        <span className="shrink-0 text-[17px] font-medium tracking-tight">
+          {open ? "Hide morning brief" : "View morning brief"}
+        </span>
+        <span className="nx-label min-w-0 truncate">
+          {status.kind === "ready"
+            ? "What needs you today"
+            : status.kind === "loading"
+              ? "Loading…"
+              : status.kind === "disconnected"
+                ? "Not connected"
+                : "Unavailable"}
+          {generatedAt ? ` · ${formatGeneratedAt(generatedAt)}` : ""}
+        </span>
+      </button>
+
+      {open && (
+      <>
+      <header className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="nx-label-lg">Today at a glance</p>
         <div className="flex items-center gap-2">
           {status.kind === "ready" && (
             <button
@@ -228,7 +248,7 @@ export default function BriefSection() {
               onClick={() => fetchBrief(true)}
               disabled={refreshing}
               title="Writes a new brief from your current mail, calendar and markets"
-              className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshing ? "Rewriting…" : "Rewrite"}
             </button>
@@ -246,7 +266,7 @@ export default function BriefSection() {
               type="button"
               onClick={() => fetchBrief(true)}
               disabled={refreshing}
-              className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshing ? "Retrying…" : "Retry"}
             </button>
@@ -258,7 +278,7 @@ export default function BriefSection() {
         {status.kind === "loading" && <BriefSkeleton />}
 
         {status.kind === "error" && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
             {status.message}
           </p>
         )}
@@ -272,7 +292,7 @@ export default function BriefSection() {
 
         {status.kind === "ready" && (
           <>
-            <p className="text-base font-semibold text-neutral-900">
+            <p className="text-[15px] font-semibold tracking-tight text-ink">
               {status.brief.greeting}
             </p>
             <p className="mt-1.5 text-sm leading-relaxed text-neutral-700">
@@ -280,14 +300,21 @@ export default function BriefSection() {
             </p>
 
             {status.brief.calendarUnavailable && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Based on your email only — your calendar wasn&apos;t available
                 this morning.
               </p>
             )}
 
+            {status.brief.mailUnavailable && (
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Based on your calendar only — your mail wasn&apos;t available
+                this morning. Try reconnecting Google in Settings.
+              </p>
+            )}
+
             {status.brief.priorities.length > 0 && (
-              <ul className="mt-4 divide-y divide-neutral-100 border-t border-neutral-100">
+              <ul className="mt-4 divide-y divide-line-soft border-t border-line-soft">
                 {status.brief.priorities.map((priority, i) => (
                   <li key={priority.sourceId ?? i} className="py-3">
                     <div className="flex items-start gap-3">
@@ -315,7 +342,7 @@ export default function BriefSection() {
             )}
 
             {status.brief.scheduleNote && (
-              <p className="mt-4 border-t border-neutral-100 pt-3 text-xs text-neutral-500">
+              <p className="mt-4 border-t border-line-soft pt-3 text-xs text-neutral-500">
                 {status.brief.scheduleNote}
               </p>
             )}
@@ -325,14 +352,14 @@ export default function BriefSection() {
                 Silence was the original bug: a ticked box and no section
                 looks exactly like a setting that didn't save. */}
             {rewriteError && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Couldn&apos;t rewrite the brief just now — {rewriteError}. This
                 is the one from earlier.
               </p>
             )}
 
             {status.brief.marketsUnavailable === "not_configured" && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Market prices need a data key — set{" "}
                 <code className="font-mono">TWELVE_DATA_API_KEY</code> in your
                 environment and restart. Headlines below are unaffected.
@@ -340,23 +367,23 @@ export default function BriefSection() {
             )}
 
             {status.brief.marketsUnavailable === "fetch_failed" && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Couldn&apos;t reach the market data source. The rest of your
                 brief is unaffected.
               </p>
             )}
 
             {status.brief.newsUnavailable === "fetch_failed" && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Couldn&apos;t reach the news feeds this morning. The rest of
                 your brief is unaffected.
               </p>
             )}
 
             {status.brief.markets && status.brief.markets.quotes.length > 0 && (
-              <div className="mt-4 border-t border-neutral-100 pt-3">
+              <div className="mt-4 border-t border-line-soft pt-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  <p className="nx-label">
                     Markets
                   </p>
                   {(() => {
@@ -380,8 +407,8 @@ export default function BriefSection() {
             )}
 
             {status.brief.situation && (
-              <div className="mt-4 border-t border-neutral-100 pt-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <div className="mt-4 border-t border-line-soft pt-3">
+                <p className="nx-label">
                   What&apos;s going on
                 </p>
                 {/* Split on blank lines so the markets paragraph and the
@@ -406,8 +433,8 @@ export default function BriefSection() {
             )}
 
             {status.brief.newsHighlights && status.brief.newsHighlights.length > 0 && (
-              <div className="mt-4 border-t border-neutral-100 pt-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <div className="mt-4 border-t border-line-soft pt-3">
+                <p className="nx-label">
                   Headlines
                 </p>
                 <ul className="mt-2 space-y-2">
@@ -432,6 +459,8 @@ export default function BriefSection() {
           </>
         )}
       </div>
+      </>
+      )}
     </section>
   );
 }
@@ -439,25 +468,25 @@ export default function BriefSection() {
 function BriefSkeleton() {
   return (
     <div>
-      <div className="h-4 w-2/5 animate-pulse rounded bg-neutral-100" />
+      <div className="h-4 w-2/5 animate-pulse rounded bg-surface-sunken" />
       <div className="mt-2 space-y-2">
-        <div className="h-3 w-full animate-pulse rounded bg-neutral-100" />
-        <div className="h-3 w-4/5 animate-pulse rounded bg-neutral-100" />
+        <div className="h-3 w-full animate-pulse rounded bg-surface-sunken" />
+        <div className="h-3 w-4/5 animate-pulse rounded bg-surface-sunken" />
       </div>
-      <ul className="mt-4 divide-y divide-neutral-100 border-t border-neutral-100">
+      <ul className="mt-4 divide-y divide-line-soft border-t border-line-soft">
         {Array.from({ length: 3 }).map((_, i) => (
           <li key={i} className="py-3">
             <div className="flex items-start gap-3">
               <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-neutral-200" />
               <div className="min-w-0 flex-1 space-y-2">
-                <div className="h-3 w-1/2 animate-pulse rounded bg-neutral-100" />
-                <div className="h-3 w-3/4 animate-pulse rounded bg-neutral-100" />
+                <div className="h-3 w-1/2 animate-pulse rounded bg-surface-sunken" />
+                <div className="h-3 w-3/4 animate-pulse rounded bg-surface-sunken" />
               </div>
             </div>
           </li>
         ))}
       </ul>
-      <div className="mt-4 h-3 w-1/3 animate-pulse rounded bg-neutral-100" />
+      <div className="mt-4 h-3 w-1/3 animate-pulse rounded bg-surface-sunken" />
     </div>
   );
 }

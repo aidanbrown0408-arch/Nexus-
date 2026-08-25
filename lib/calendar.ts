@@ -113,6 +113,9 @@ export async function fetchUpcomingEvents(
         source: "google" as const,
         calendarName: calendarNames.get(calendarId) ?? null,
         calendarId,
+        // Google events are addressed by id + calendarId; there's no
+        // separate object URL the way CalDAV needs.
+        objectUrl: null,
         recurringEventId: e.recurringEventId ?? null,
         uid: e.iCalUID ?? null,
         attendees: (e.attendees ?? [])

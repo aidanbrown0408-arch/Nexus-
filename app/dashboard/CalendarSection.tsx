@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppleConnectForm from "./AppleConnectForm";
 import AddEventForm from "./AddEventForm";
-import EventRow from "./EventRow";
+import EventRow, { formatDay } from "./EventRow";
 import type { EventSummary } from "@/lib/events";
 import type { PrepItem } from "@/lib/prep";
 
@@ -41,11 +41,29 @@ const RANGE_LABEL: Record<(typeof RANGE_OPTIONS)[number], string> = {
   90: "90 days",
 };
 
-export default function CalendarSection() {
+export default function CalendarSection({
+  focused = false,
+  onToggleFocus,
+}: {
+  // Full screen: the board hands this panel the whole row (chat collapses
+  // to a bar above it) instead of a third of it. Purely a layout signal
+  // from the parent — this component just needs to know so it can force
+  // itself open and offer the way back.
+  focused?: boolean;
+  onToggleFocus?: () => void;
+} = {}) {
   // The window the card is showing. Whitelisted server-side too — this
   // value reaches a Google API call and an iCloud time-range query.
   const [days, setDays] = useState<7 | 30 | 90>(7);
   const [truncated, setTruncated] = useState(false);
+  // Same Expand / Collapse affordance the Inbox panel has.
+  const [expanded, setExpanded] = useState(true);
+
+  // Going full screen while the panel happened to be folded would hand
+  // the whole row to a one-line summary — force it back open.
+  useEffect(() => {
+    if (focused) setExpanded(true);
+  }, [focused]);
   // Switching 90 days → 7 days fires two requests, and the slower one is
   // usually the wider one. Without this, the 90-day response could land
   // last and paint three months of events under a "next 7 days" heading,
@@ -140,6 +158,18 @@ export default function CalendarSection() {
   // When a whole series went, every occurrence goes rather than the one
   // row that was clicked — otherwise next Tuesday's standup sits there
   // looking alive until the page is refreshed.
+  // Patch a row in place once the server confirms an edit. Not
+  // optimistic — see the comment on EventRow's onUpdated prop — so this
+  // only ever runs after the PATCH already succeeded.
+  const handleUpdated = useCallback(
+    (eventKey: string, fields: Partial<EventSummary>) => {
+      setEvents((current) =>
+        current.map((e) => (e.key === eventKey ? { ...e, ...fields } : e))
+      );
+    },
+    []
+  );
+
   const handleDeleted = useCallback((eventKey: string, seriesId?: string) => {
     setEvents((current) => {
       const doomed = new Set(
@@ -171,6 +201,20 @@ export default function CalendarSection() {
 
   // Only counts prep for events still on screen — an item attached to an
   // event that has since passed shouldn't keep nagging from the header.
+  // Events arrive as one flat, already-sorted list; the board wants them
+  // bucketed under Today / Tomorrow / a weekday. Insertion order into the
+  // Map preserves the sort, so the groups come out chronological too.
+  const dayGroups = (() => {
+    const buckets = new Map<string, EventSummary[]>();
+    for (const event of events) {
+      const day = formatDay(event.start) || "Later";
+      const bucket = buckets.get(day);
+      if (bucket) bucket.push(event);
+      else buckets.set(day, [event]);
+    }
+    return Array.from(buckets, ([day, list]) => ({ day, events: list }));
+  })();
+
   const openPrepCount = events.reduce(
     (total, event) =>
       total + (prep[event.key] ?? []).filter((item) => !item.done).length,
@@ -178,23 +222,44 @@ export default function CalendarSection() {
   );
 
   return (
-    <section className="mt-8 w-full max-w-2xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-neutral-900">Upcoming</h2>
-          <p className="text-sm text-neutral-500">
-            {openPrepCount > 0
-              ? `${openPrepCount} thing${
-                  openPrepCount === 1 ? "" : "s"
-                } to do before your next ${RANGE_LABEL[days]} of events.`
-              : `Your next ${RANGE_LABEL[days]}, across every calendar you've connected.`}
-          </p>
+    <section className="nx-board-panel">
+      <header className="nx-board-head">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <h2 className="shrink-0 text-base font-semibold tracking-tight text-ink">
+            Calendar
+          </h2>
+          <div className="flex shrink-0 items-center gap-3.5">
+            {onToggleFocus && (
+              <button
+                type="button"
+                onClick={onToggleFocus}
+                aria-pressed={focused}
+                className="nx-board-toggle"
+              >
+                {focused ? "Exit full screen" : "Full screen"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="nx-board-toggle"
+            >
+              {expanded ? "Collapse" : "Expand"}
+            </button>
+          </div>
         </div>
+        <p className="nx-label truncate">
+          {openPrepCount > 0
+            ? `${openPrepCount} to do first`
+            : `Next ${RANGE_LABEL[days]}`}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
         {status.kind === "ready" && (
           <div
             role="group"
             aria-label="How far ahead to look"
-            className="flex overflow-hidden rounded-full border border-neutral-200"
+            className="nx-segment"
           >
             {RANGE_OPTIONS.map((option) => (
               <button
@@ -202,11 +267,8 @@ export default function CalendarSection() {
                 type="button"
                 onClick={() => setDays(option)}
                 aria-pressed={days === option}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  days === option
-                    ? "bg-neutral-900 text-white"
-                    : "text-neutral-600 hover:bg-neutral-50"
-                }`}
+                data-active={days === option}
+                className="!px-3.5 !py-1.5 !text-[13px]"
               >
                 {RANGE_SHORT[option]}
               </button>
@@ -218,20 +280,27 @@ export default function CalendarSection() {
             type="button"
             onClick={fetchEvents}
             disabled={loadingEvents}
-            className="rounded-full border border-neutral-200 px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="text-[13px] font-semibold text-ink transition-colors hover:text-accent-600 disabled:opacity-60"
           >
             {loadingEvents ? "Refreshing…" : "Refresh"}
           </button>
         )}
+        </div>
       </header>
 
-      <div className="mt-4">
+      {!expanded ? (
+        <p className="mt-3 text-sm text-ink-ghost">
+          {events.length} event{events.length === 1 ? "" : "s"} in the next{" "}
+          {RANGE_LABEL[days]}.
+        </p>
+      ) : (
+      <div className="nx-board-body mt-3">
         {status.kind === "loading" && (
           <p className="text-sm text-neutral-500">Loading…</p>
         )}
 
         {status.kind === "error" && (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
             {status.message}
           </p>
         )}
@@ -245,7 +314,7 @@ export default function CalendarSection() {
         {status.kind === "ready" && (
           <>
             {eventsError && (
-              <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+              <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
                 {eventsError}
               </p>
             )}
@@ -254,7 +323,7 @@ export default function CalendarSection() {
                 list can't show a gap, so silence would read as "nothing
                 scheduled" rather than "half your calendar is missing". */}
             {sources?.google === "scope_missing" && (
-              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Calendar was added after you connected Google, so your
                 existing permission doesn&apos;t cover it.{" "}
                 <a
@@ -268,7 +337,7 @@ export default function CalendarSection() {
             )}
 
             {sources?.apple === "auth_failed" && (
-              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Apple isn&apos;t accepting your app-specific password
                 anymore — it was probably revoked.{" "}
                 <button
@@ -283,7 +352,7 @@ export default function CalendarSection() {
             )}
 
             {(sources?.google === "error" || sources?.apple === "error") && (
-              <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Couldn&apos;t reach{" "}
                 {sources.google === "error" ? "Google" : "iCloud"} just now,
                 so some events may be missing.
@@ -297,23 +366,45 @@ export default function CalendarSection() {
                 Nothing scheduled in the next {RANGE_LABEL[days]}.
               </p>
             ) : (
-              <ul className="divide-y divide-neutral-100">
-                {events.map((event) => (
-                  <EventRow
-                    key={event.key}
-                    event={event}
-                    items={prep[event.key] ?? []}
-                    generated={generated.has(event.key)}
-                    onItemsChange={handleItemsChange}
-                    onGenerated={handleGenerated}
-                    onDeleted={handleDeleted}
-                    // Naming the calendar only earns its space once both
-                    // services are in play — otherwise every row says
-                    // the same word.
-                    showCalendarName={googleConnected && appleConnected}
-                  />
+              <div className="flex flex-col gap-4">
+                {dayGroups.map((group) => (
+                  <div key={group.day}>
+                    {/* Day headers carry the date so the rows don't have
+                        to repeat it — the canvas puts a mono label and a
+                        hairline across the top of each day. */}
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className={
+                          "nx-label-lg shrink-0 " +
+                          (group.day === "Today" ? "text-accent-600" : "")
+                        }
+                      >
+                        {group.day}
+                      </span>
+                      <span className="h-px flex-1 bg-line-soft" />
+                    </div>
+
+                    <ul className="mt-2.5 flex flex-col gap-2">
+                      {group.events.map((event) => (
+                        <EventRow
+                          key={event.key}
+                          event={event}
+                          items={prep[event.key] ?? []}
+                          generated={generated.has(event.key)}
+                          onItemsChange={handleItemsChange}
+                          onGenerated={handleGenerated}
+                          onDeleted={handleDeleted}
+                          onUpdated={handleUpdated}
+                          // Naming the calendar only earns its space once
+                          // both services are in play — otherwise every
+                          // row says the same word.
+                          showCalendarName={googleConnected && appleConnected}
+                        />
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
 
             {/* Either service can take a new event now, so this shows
@@ -325,7 +416,6 @@ export default function CalendarSection() {
             )}
           </>
         )}
-      </div>
 
       {showAppleForm ? (
         <AppleConnectForm
@@ -337,13 +427,13 @@ export default function CalendarSection() {
         />
       ) : (
         status.kind !== "loading" && (
-          <footer className="mt-5 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-4">
-            <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+          <footer className="mt-5 flex flex-wrap items-center gap-2 border-t border-line-soft pt-4">
+            <span className="nx-label">
               Calendars
             </span>
 
             {googleConnected ? (
-              <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600">
+              <span className="rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-neutral-600">
                 Google connected
               </span>
             ) : (
@@ -356,7 +446,7 @@ export default function CalendarSection() {
             )}
 
             {appleConnected ? (
-              <span className="flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-600">
+              <span className="flex items-center gap-2 rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-neutral-600">
                 Apple connected
                 <button
                   type="button"
@@ -379,28 +469,30 @@ export default function CalendarSection() {
         )
       )}
       {truncated && (
-        <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
           That&apos;s more events than this card shows at once — some later
           ones in this range are hidden. Narrow the window to see a complete
           list.
         </p>
       )}
-
+      </div>
+      )}
     </section>
   );
 }
 
 function EventListSkeleton() {
   return (
-    <ul className="divide-y divide-neutral-100">
+    <ul className="flex flex-col gap-2">
       {Array.from({ length: 4 }).map((_, i) => (
-        <li key={i} className="py-3">
-          <div className="flex items-start gap-3">
-            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-neutral-200" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-3 w-1/2 animate-pulse rounded bg-neutral-100" />
-              <div className="h-3 w-1/3 animate-pulse rounded bg-neutral-100" />
-            </div>
+        <li
+          key={i}
+          className="flex gap-3 rounded-card border border-line-soft bg-surface-soft p-3"
+        >
+          <span className="w-[3px] shrink-0 rounded-full bg-surface-sunken" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-2.5 w-1/3 animate-pulse rounded bg-surface-sunken" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-surface-sunken" />
           </div>
         </li>
       ))}

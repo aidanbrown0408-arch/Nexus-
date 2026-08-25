@@ -167,6 +167,22 @@ function calendarName(calendar: DAVCalendar): string | null {
   return null;
 }
 
+// Find the collection a calendarUrl points at. Every write here — create,
+// update, or a lookup before one — needs the actual DAVCalendar object,
+// not just its URL, because tsdav's object-level calls take the whole
+// thing.
+async function findCalendar(
+  client: DAVClient,
+  calendarUrl: string
+): Promise<DAVCalendar> {
+  const calendars = await client.fetchCalendars();
+  const calendar = calendars.find((c) => c.url === calendarUrl);
+  if (!calendar) {
+    throw new Error("That iCloud calendar is no longer there");
+  }
+  return calendar;
+}
+
 // --- writes -------------------------------------------------------------
 
 // An iCloud calendar the user can put an event on.
@@ -238,6 +254,60 @@ function escapeICalText(value: string): string {
     .replace(/\r?\n/g, "\\n");
 }
 
+// The fields common to a create and an update — everything that goes
+// into the VEVENT body except the identity (uid) and timing (dtstamp),
+// which the two callers each own for their own reasons: create mints a
+// fresh uid, update keeps the one the event already had.
+type EventFields = {
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  location?: string | null;
+  description?: string | null;
+  // Passed through verbatim rather than re-derived, since neither
+  // createAppleEvent nor updateAppleEvent parses a Recurrence back out —
+  // update simply preserves whatever RRULE line the event already had.
+  rruleLine?: string | null;
+};
+
+function buildICalString(uid: string, fields: EventFields): string {
+  const stamp = toICalUtc(new Date().toISOString());
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Nexus//EN",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${stamp}`,
+    fields.allDay
+      ? `DTSTART;VALUE=DATE:${toICalDate(fields.start)}`
+      : `DTSTART:${toICalUtc(fields.start)}`,
+    fields.allDay
+      ? `DTEND;VALUE=DATE:${toICalDate(nextDay(fields.end))}`
+      : `DTEND:${toICalUtc(fields.end)}`,
+    `SUMMARY:${escapeICalText(fields.summary)}`,
+  ];
+
+  if (fields.location) {
+    lines.push(`LOCATION:${escapeICalText(fields.location)}`);
+  }
+  if (fields.description) {
+    lines.push(`DESCRIPTION:${escapeICalText(fields.description)}`);
+  }
+  if (fields.rruleLine) {
+    lines.push(fields.rruleLine);
+  }
+
+  lines.push("END:VEVENT", "END:VCALENDAR");
+
+  // CRLF, not LF. RFC 5545 requires it and iCloud rejects files that
+  // use bare newlines.
+  return lines.join("\r\n") + "\r\n";
+}
+
 export type NewAppleEvent = {
   calendarUrl: string;
   summary: string;
@@ -268,52 +338,22 @@ export async function createAppleEvent(
   event: NewAppleEvent
 ): Promise<CreatedAppleEvent> {
   const client = await connect(credentials);
-
-  const calendars = await client.fetchCalendars();
-  const calendar = calendars.find((c) => c.url === event.calendarUrl);
-  if (!calendar) {
-    throw new Error("That iCloud calendar is no longer there");
-  }
+  const calendar = await findCalendar(client, event.calendarUrl);
 
   const uid = `nexus-${crypto.randomUUID()}`;
-  const stamp = toICalUtc(new Date().toISOString());
-
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//Nexus//EN",
-    "CALSCALE:GREGORIAN",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${stamp}`,
-    event.allDay
-      ? `DTSTART;VALUE=DATE:${toICalDate(event.start)}`
-      : `DTSTART:${toICalUtc(event.start)}`,
-    event.allDay
-      ? `DTEND;VALUE=DATE:${toICalDate(nextDay(event.end))}`
-      : `DTEND:${toICalUtc(event.end)}`,
-    `SUMMARY:${escapeICalText(event.summary)}`,
-  ];
-
-  if (event.location) {
-    lines.push(`LOCATION:${escapeICalText(event.location)}`);
-  }
-  if (event.description) {
-    lines.push(`DESCRIPTION:${escapeICalText(event.description)}`);
-  }
   // Same RRULE the Google path sends, built by the same function. One
   // rule, two wire formats — a standup that repeats correctly on one
   // service and wrongly on the other is worse than one that doesn't
   // repeat at all.
-  if (event.recurrence) {
-    lines.push(toICalRRule(event.recurrence));
-  }
-
-  lines.push("END:VEVENT", "END:VCALENDAR");
-
-  // CRLF, not LF. RFC 5545 requires it and iCloud rejects files that
-  // use bare newlines.
-  const iCalString = lines.join("\r\n") + "\r\n";
+  const iCalString = buildICalString(uid, {
+    summary: event.summary,
+    start: event.start,
+    end: event.end,
+    allDay: event.allDay,
+    location: event.location,
+    description: event.description,
+    rruleLine: event.recurrence ? toICalRRule(event.recurrence) : null,
+  });
   const filename = `${uid}.ics`;
 
   const response = await client.createCalendarObject({
@@ -338,10 +378,109 @@ export async function createAppleEvent(
   return { uid, calendarUrl: event.calendarUrl, objectUrl: `${base}${filename}` };
 }
 
-// Remove an event Nexus created. Addressed by the object URL returned at
-// creation, which is why only Nexus's own Apple events can be deleted —
-// events fetched from iCloud don't carry their object URL through the
-// parse path, so the delete route refuses them rather than guessing.
+export type AppleEventPatch = {
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  location?: string | null;
+  description?: string | null;
+};
+
+// Change an event Nexus can see. Unlike Google's PATCH, CalDAV has no
+// partial-update verb — the whole .ics resource is replaced — so this
+// reads the object first, keeps whatever the caller didn't ask to
+// change (recurrence, in particular: editing a repeating series' rule
+// isn't exposed here, so the existing RRULE rides through untouched),
+// and writes the merged result back under the same UID and etag.
+//
+// The etag is what protects against clobbering an edit made from the
+// Calendar app a moment ago — iCloud rejects the PUT with a 412 if the
+// object moved since it was read, which surfaces here as a thrown error
+// rather than a silent overwrite.
+export async function updateAppleEvent(
+  credentials: AppleCredentials,
+  calendarUrl: string,
+  objectUrl: string,
+  patch: AppleEventPatch
+): Promise<void> {
+  const client = await connect(credentials);
+  const calendar = await findCalendar(client, calendarUrl);
+
+  const [object] = await client.fetchCalendarObjects({
+    calendar,
+    objectUrls: [objectUrl],
+  });
+  if (!object?.data || typeof object.data !== "string") {
+    throw new Error("That event is no longer there");
+  }
+
+  const component = new ICAL.Component(ICAL.parse(object.data));
+  const vevent = component.getFirstSubcomponent("vevent");
+  if (!vevent) {
+    throw new Error("Couldn't read that event");
+  }
+
+  const uid = vevent.getFirstPropertyValue("uid") as string | null;
+  if (!uid) {
+    throw new Error("Couldn't read that event");
+  }
+
+  // The existing RRULE, if any, carried through verbatim — this route
+  // doesn't offer recurrence editing, so a repeating series keeps
+  // repeating the way it already did.
+  const rruleProp = vevent.getFirstProperty("rrule");
+  const rruleLine = rruleProp
+    ? `RRULE:${(rruleProp.getFirstValue() as ICAL.Recur).toString()}`
+    : null;
+
+  // CalDAV has no partial update — the PUT below replaces the whole
+  // object — so a field the caller left `undefined` has to be filled in
+  // from what's already there, or it silently vanishes. Google's PATCH
+  // does this for free by only sending the keys that changed; here it
+  // has to happen by hand.
+  const existingLocation =
+    (vevent.getFirstPropertyValue("location") as string | null) || undefined;
+  const existingDescription =
+    (vevent.getFirstPropertyValue("description") as string | null) || undefined;
+
+  const iCalString = buildICalString(uid, {
+    summary: patch.summary,
+    start: patch.start,
+    end: patch.end,
+    allDay: patch.allDay,
+    location: patch.location !== undefined ? patch.location : existingLocation,
+    description:
+      patch.description !== undefined ? patch.description : existingDescription,
+    rruleLine,
+  });
+
+  const response = await client.updateCalendarObject({
+    calendarObject: { url: objectUrl, data: iCalString, etag: object.etag },
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error("That iCloud calendar is read-only");
+    }
+    if (response.status === 404 || response.status === 410) {
+      throw new Error("That event is no longer there");
+    }
+    throw new Error(
+      `iCloud refused the update (${response.status ?? "unknown error"})`
+    );
+  }
+}
+
+// Remove an event. Addressed by its CalDAV object URL, which every
+// Apple event carries now that fetchAppleEvents threads it through the
+// parse path — not just the ones Nexus itself created.
+//
+// A recurring series lives in one .ics resource holding the master and
+// every edited instance, so deleting it takes the whole series with it.
+// There's no per-occurrence delete over CalDAV the way Google's
+// recurringEventId gives us — the UI doesn't offer the "just this one"
+// choice for an Apple event for that reason.
 export async function deleteAppleEvent(
   credentials: AppleCredentials,
   objectUrl: string
@@ -357,6 +496,63 @@ export async function deleteAppleEvent(
       `iCloud refused the deletion (${response.status ?? "unknown error"})`
     );
   }
+}
+
+export type AppleEventSnapshot = {
+  calendarUrl: string;
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  location: string | null;
+  description: string | null;
+};
+
+// Read an event back before deleting it, so undo has something to
+// recreate from. Mirrors snapshotEvent on the Google side, minus
+// attendees and recurrence — Apple events here never carry guests, and
+// a restored series comes back as the single occurrence its snapshot
+// describes rather than the whole rule, which the undo route's summary
+// is explicit about.
+export async function snapshotAppleEvent(
+  credentials: AppleCredentials,
+  calendarUrl: string,
+  objectUrl: string
+): Promise<AppleEventSnapshot | null> {
+  const client = await connect(credentials);
+  const calendar = await findCalendar(client, calendarUrl);
+
+  const [object] = await client.fetchCalendarObjects({
+    calendar,
+    objectUrls: [objectUrl],
+  });
+  if (!object?.data || typeof object.data !== "string") return null;
+
+  const component = new ICAL.Component(ICAL.parse(object.data));
+  const vevent = component.getFirstSubcomponent("vevent");
+  if (!vevent) return null;
+
+  const event = new ICAL.Event(vevent);
+  const allDay = Boolean(event.startDate?.isDate);
+  const start = allDay
+    ? event.startDate.toString()
+    : event.startDate.toJSDate().toISOString();
+  const end = event.endDate
+    ? allDay
+      ? event.endDate.toString()
+      : event.endDate.toJSDate().toISOString()
+    : start;
+
+  return {
+    calendarUrl,
+    summary: event.summary || "(no title)",
+    start,
+    end,
+    allDay,
+    location: event.location?.trim() || null,
+    description:
+      (vevent.getFirstPropertyValue("description") as string | null) || null,
+  };
 }
 
 // Fetch events from now through `days` ahead across every iCloud
@@ -385,10 +581,13 @@ export async function fetchAppleEvents(
 
       return objects.flatMap((object) => {
         if (!object.data || typeof object.data !== "string") return [];
+        if (!object.url) return [];
         try {
           return parseCalendarObject(
             object.data,
             calendarName(calendar),
+            calendar.url as string,
+            object.url,
             windowStart,
             windowEnd
           );
@@ -432,7 +631,9 @@ export async function fetchAppleEvents(
 // be exercised without live iCloud credentials.
 export function parseCalendarObject(
   ics: string,
-  calendar: string | null,
+  calendarLabel: string | null,
+  calendarUrl: string,
+  objectUrl: string,
   windowStart: Date,
   windowEnd: Date
 ): RawEvent[] {
@@ -476,7 +677,9 @@ export function parseCalendarObject(
         master,
         event.startDate,
         event.endDate,
-        calendar
+        calendarLabel,
+        calendarUrl,
+        objectUrl
       );
       if (single && overlapsWindow(single, windowStart, windowEnd)) {
         out.push(single);
@@ -502,7 +705,9 @@ export function parseCalendarObject(
         details.item.component,
         details.startDate,
         details.endDate,
-        calendar
+        calendarLabel,
+        calendarUrl,
+        objectUrl
       );
 
       if (summary && overlapsWindow(summary, windowStart, windowEnd)) {
@@ -525,7 +730,9 @@ export function parseCalendarObject(
       override,
       event.startDate,
       event.endDate,
-      calendar
+      calendarLabel,
+      calendarUrl,
+      objectUrl
     );
     if (summary && overlapsWindow(summary, windowStart, windowEnd)) {
       out.push(summary);
@@ -555,7 +762,9 @@ function toEventSummary(
   component: ICAL.Component,
   startDate: ICAL.Time,
   endDate: ICAL.Time,
-  calendar: string | null
+  calendarLabel: string | null,
+  calendarUrl: string,
+  objectUrl: string
 ): RawEvent | null {
   if (!startDate) return null;
 
@@ -588,14 +797,19 @@ function toEventSummary(
     attendeeCount: attendees.length,
     hangoutLink: conferenceLink(component),
     source: "apple",
-    calendarName: calendar,
-    // CalDAV writes aren't implemented, so nothing addresses an Apple
-    // event for a mutation. Null rather than a guess keeps the write
-    // routes honest about what they can act on.
-    calendarId: null,
-    // Apple events can't be deleted here at all (no object URL through
-    // the parse path), so the series-vs-occurrence question never comes
-    // up for them.
+    calendarName: calendarLabel,
+    // The collection this event lives on — needed to look the calendar
+    // back up (via findCalendar) before an update or a pre-delete
+    // snapshot.
+    calendarId: calendarUrl,
+    // The event's own .ics resource. Every occurrence of a recurring
+    // series shares the same object URL, since they all live in one
+    // file — which is also why there's no per-occurrence write here.
+    objectUrl,
+    // Apple has no per-occurrence delete the way Google's
+    // recurringEventId enables, so this stays null even for a
+    // recurring instance — the UI never offers a series-vs-occurrence
+    // choice for an Apple event.
     recurringEventId: null,
     uid,
     attendees,

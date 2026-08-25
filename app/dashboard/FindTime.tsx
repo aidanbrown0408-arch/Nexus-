@@ -90,13 +90,13 @@ export default function FindTime({ guests, onPick }: Props) {
   }
 
   return (
-    <div className="mt-2 rounded-xl border border-neutral-200 bg-white p-3">
+    <div className="mt-2 rounded-xl border border-line bg-white p-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-700">
         <span>Find</span>
         <select
           value={duration}
           onChange={(e) => setDuration(Number(e.target.value))}
-          className="rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+          className="rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
         >
           {DURATIONS.map((d) => (
             <option key={d} value={d}>
@@ -108,7 +108,7 @@ export default function FindTime({ guests, onPick }: Props) {
         <select
           value={daysAhead}
           onChange={(e) => setDaysAhead(Number(e.target.value))}
-          className="rounded-lg border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
+          className="rounded-xl border border-neutral-300 bg-white px-2 py-1 text-xs focus:border-indigo-500 focus:outline-none"
         >
           <option value={1}>day</option>
           <option value={3}>3 days</option>
@@ -143,7 +143,7 @@ export default function FindTime({ guests, onPick }: Props) {
       )}
 
       {state.kind === "error" && (
-        <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
+        <p className="mt-2 rounded-xl bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
           {state.message}
         </p>
       )}
@@ -154,7 +154,7 @@ export default function FindTime({ guests, onPick }: Props) {
               reads identically to "free". Saying so is the difference
               between a proposal and a guess. */}
           {state.unknownGuests.length > 0 && (
-            <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+            <p className="mb-2 rounded-xl bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
               Couldn&apos;t see {state.unknownGuests.join(", ")}&apos;s
               calendar, so these times only account for yours.
             </p>

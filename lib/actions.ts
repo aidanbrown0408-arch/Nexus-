@@ -30,7 +30,12 @@ export type ActionKind =
   // an added event deletes cleanly, a deleted one comes back as a new
   // event with a new id.
   | "event_create"
-  | "event_delete";
+  | "event_delete"
+  // Editing an event's own fields (title, time, location, description).
+  // No dedicated undo kind for it below — reversing an edit would mean
+  // snapshotting the pre-edit fields the way delete snapshots the whole
+  // event, which isn't built yet, so these log with undo: "none".
+  | "event_update";
 
 export type UndoKind =
   | "delete_draft"

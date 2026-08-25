@@ -163,6 +163,56 @@ export async function createEvent(
   };
 }
 
+export type EventEdit = {
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  location?: string;
+  description?: string;
+};
+
+// Change an event's own fields — title, time, location, description.
+// Deliberately narrower than createEvent: it never touches the guest
+// list or the recurrence rule, so an edit never sends a fresh round of
+// invitations or reshapes a series by accident. Guests can still be
+// notified of a time change through Google's own patch semantics
+// (omitted fields are left alone), but this app doesn't expose that path
+// yet — widening it is a decision, not an oversight, same spirit as the
+// scope comments in lib/google.ts.
+export async function updateEvent(
+  client: OAuth2Client,
+  calendarId: string,
+  eventId: string,
+  edit: EventEdit
+): Promise<WrittenEvent> {
+  const calendar = google.calendar({ version: "v3", auth: client });
+
+  const res = await calendar.events.patch({
+    calendarId,
+    eventId,
+    // Patch, not update: fields left out of requestBody (attendees,
+    // recurrence) are left exactly as they were rather than cleared.
+    sendUpdates: "none",
+    requestBody: {
+      summary: edit.summary,
+      location: edit.location || undefined,
+      description: edit.description || undefined,
+      start: toEventDate(edit.start, edit.allDay),
+      end: toEventDate(edit.end, edit.allDay),
+    },
+  });
+
+  return {
+    id: res.data.id ?? eventId,
+    calendarId,
+    summary: res.data.summary ?? edit.summary,
+    start: res.data.start?.dateTime ?? res.data.start?.date ?? edit.start,
+    end: res.data.end?.dateTime ?? res.data.end?.date ?? edit.end,
+    htmlLink: res.data.htmlLink ?? null,
+  };
+}
+
 // Read an event back before deleting it, so there's something to restore
 // from. Returns null when the event is already gone — which makes the
 // delete a no-op rather than an error.

@@ -109,7 +109,7 @@ export default function ProfileSettingsForm() {
   const [core, ...optional] = SECTIONS;
 
   return (
-    <div className="w-full max-w-2xl">
+    <div className="w-full max-w-3xl">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">
@@ -129,11 +129,11 @@ export default function ProfileSettingsForm() {
       </div>
 
       {state === "loading" ? (
-        <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="h-4 w-2/5 animate-pulse rounded bg-neutral-100" />
+        <div className="rounded-panel border border-line bg-white p-6">
+          <div className="h-4 w-2/5 animate-pulse rounded bg-surface-sunken" />
           <div className="mt-4 space-y-3">
-            <div className="h-10 w-full animate-pulse rounded-xl bg-neutral-100" />
-            <div className="h-10 w-full animate-pulse rounded-xl bg-neutral-100" />
+            <div className="h-10 w-full animate-pulse rounded-xl bg-surface-sunken" />
+            <div className="h-10 w-full animate-pulse rounded-xl bg-surface-sunken" />
           </div>
         </div>
       ) : (
@@ -157,8 +157,8 @@ export default function ProfileSettingsForm() {
             />
           ))}
 
-          <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-neutral-900">Voice</h2>
+          <section className="mb-6 rounded-panel border border-line bg-white p-6">
+            <h2 className="text-[15px] font-semibold tracking-tight text-ink">Voice</h2>
             <p className="mt-0.5 text-sm text-neutral-500">
               How Nexus sounds when you talk to it in chat.
             </p>
@@ -219,8 +219,8 @@ function SectionCard({
   setField: (field: string, value: string | string[]) => void;
 }) {
   return (
-    <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-      <h2 className="text-base font-semibold text-neutral-900">{title}</h2>
+    <section className="mb-6 rounded-panel border border-line bg-white p-6">
+      <h2 className="text-[15px] font-semibold tracking-tight text-ink">{title}</h2>
       {description && (
         <p className="mt-0.5 text-sm text-neutral-500">{description}</p>
       )}
@@ -285,7 +285,7 @@ function FieldEditor({
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.target.value)}
             placeholder={question.placeholder}
-            className="w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
           />
         )}
 
@@ -294,7 +294,7 @@ function FieldEditor({
             type="time"
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.target.value)}
-            className="rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-indigo-400"
+            className="rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-indigo-400"
           />
         )}
 
@@ -313,7 +313,7 @@ function FieldEditor({
             }
             rows={question.kind === "list" ? 3 : 3}
             placeholder={question.placeholder}
-            className="w-full resize-none rounded-xl border border-neutral-200 px-3 py-2 text-sm leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full resize-none rounded-xl border border-line px-3 py-2 text-sm leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
           />
         )}
 
@@ -329,7 +329,7 @@ function FieldEditor({
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
-                      : "border-neutral-200 text-neutral-600 hover:bg-neutral-50"
+                      : "border-line text-neutral-600 hover:bg-surface-soft"
                   }`}
                 >
                   {option.label}
@@ -346,7 +346,7 @@ function FieldEditor({
               value={otherValue ?? ""}
               onChange={(e) => onOtherChange?.(e.target.value)}
               placeholder="What field is it?"
-              className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+              className="mt-2 w-full rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
             />
           )}
 
@@ -369,7 +369,7 @@ function FieldEditor({
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
-                      : "border-neutral-200 text-neutral-600 hover:bg-neutral-50"
+                      : "border-line text-neutral-600 hover:bg-surface-soft"
                   }`}
                 >
                   {option.label}

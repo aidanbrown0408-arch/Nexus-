@@ -54,7 +54,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4"
+      className="mt-4 rounded-xl border border-line bg-surface-soft p-4"
     >
       <h3 className="text-sm font-semibold text-neutral-900">
         Connect Apple Calendar
@@ -96,7 +96,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
             value={appleId}
             onChange={(e) => setAppleId(e.target.value)}
             placeholder="you@icloud.com"
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
         </label>
 
@@ -111,7 +111,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
             value={appPassword}
             onChange={(e) => setAppPassword(e.target.value)}
             placeholder="abcd-efgh-ijkl-mnop"
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 font-mono text-sm text-neutral-900 placeholder:font-sans placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 font-mono text-sm text-neutral-900 placeholder:font-sans placeholder:text-neutral-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <span className="mt-1 block text-xs text-neutral-500">
             Not your regular Apple ID password. Stored encrypted, and only
@@ -121,7 +121,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
       </div>
 
       {error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+        <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
           {error}
         </p>
       )}

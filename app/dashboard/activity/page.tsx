@@ -15,19 +15,20 @@ export const dynamic = "force-dynamic";
 // scrolls away.
 export default function ActivityPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-12">
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-12">
       <Link
         href="/dashboard"
-        className="text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800"
+        className="nx-btn-quiet nx-btn-sm self-start"
       >
         ← Back to dashboard
       </Link>
 
-      <header className="mt-6">
-        <h1 className="text-2xl font-semibold text-neutral-900">
+      <header className="mt-7">
+        <p className="nx-label-lg">Action log</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
           What Nexus has done
         </h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-ink-muted">
           Every change made on your behalf, newest first. Anything
           reversible can be put back from here.
         </p>

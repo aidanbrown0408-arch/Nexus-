@@ -2,9 +2,183 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Plain light background for the whole app. Indigo is the one accent
-   color used for buttons and links (Tailwind's built-in indigo-*). */
-body {
-  background: #fafafa;
-  color: #171717;
+/* Nexus visual language, from the design canvas:
+   a warm paper canvas, white panels with hairline borders, fully-round
+   pills for every control, and IBM Plex Mono in uppercase for labels. */
+
+@layer base {
+  body {
+    background: theme("colors.canvas");
+    color: theme("colors.ink.DEFAULT");
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: theme("colors.accent.100");
+    color: theme("colors.accent.900");
+  }
+
+  /* The board is full of independently scrolling columns, so the stock
+     scrollbars end up being a lot of furniture. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme("colors.line.strong") transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: theme("colors.line.DEFAULT");
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: theme("colors.line.strong");
+  }
+
+  :focus-visible {
+    outline: 2px solid theme("colors.accent.600");
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Small uppercase mono labels — the eyebrows, timestamps and status
+     lines that carry most of the design's character. */
+  .nx-label {
+    @apply font-mono text-[11px] uppercase tracking-eyebrow text-ink-ghost;
+  }
+  .nx-label-lg {
+    @apply font-mono text-[11px] uppercase tracking-label text-ink-ghost;
+  }
+  .nx-chip-label {
+    @apply font-mono text-[10px] uppercase tracking-chip;
+  }
+
+  /* Panels. The dashboard is a board of these. */
+  .nx-panel {
+    @apply rounded-panel border border-line bg-white;
+  }
+  .nx-card {
+    @apply rounded-card border border-line-soft bg-white;
+  }
+  .nx-well {
+    @apply rounded-well border border-line-soft bg-surface-soft;
+  }
+
+  /* Controls. Everything is a pill. */
+  .nx-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-[18px] py-2.5
+           text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .nx-btn-primary {
+    @apply nx-btn bg-accent-600 text-white hover:bg-accent-700;
+  }
+  .nx-btn-ink {
+    @apply nx-btn bg-ink text-white hover:bg-ink-soft;
+  }
+  .nx-btn-quiet {
+    @apply nx-btn border border-line bg-white text-ink hover:bg-surface-soft;
+  }
+  .nx-btn-ghost {
+    @apply nx-btn bg-transparent text-ink-muted hover:text-ink;
+  }
+  .nx-btn-sm {
+    @apply px-4 py-2 text-[13px];
+  }
+
+  /* Segmented control (Voice / Text, calendar views). A cream track with
+     the active tab lifted out of it in white. */
+  .nx-segment {
+    @apply inline-flex gap-1 rounded-full border border-line/70 bg-surface-muted p-1;
+  }
+  .nx-segment > button {
+    @apply rounded-full px-6 py-2 text-[15px] font-medium text-ink-muted
+           transition-all duration-200 hover:text-ink;
+  }
+  .nx-segment > button[data-active="true"] {
+    @apply bg-white text-ink shadow-tab hover:text-ink;
+  }
+
+  /* Suggestion / filter chips. */
+  .nx-chip {
+    @apply rounded-full border border-line bg-surface-soft px-4 py-2 text-sm
+           text-ink-body transition-colors hover:bg-surface-muted hover:text-ink;
+  }
+  .nx-tag {
+    @apply nx-chip-label rounded-full bg-surface-sunken px-2.5 py-[3px] text-ink-muted;
+  }
+
+  /* Fields. */
+  .nx-input {
+    @apply w-full rounded-full border border-line bg-surface-soft px-4 py-2.5 text-sm
+           text-ink outline-none transition-colors placeholder:text-ink-ghost
+           focus:border-accent-600;
+  }
+  .nx-textarea {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-3 text-sm leading-relaxed
+           text-ink outline-none transition-colors placeholder:text-ink-ghost
+           focus:border-accent-600;
+  }
+
+  /* A column of the dashboard board: fills the row height, scrolls its
+     own content, and never pushes the board taller. */
+  .nx-board-panel {
+    @apply flex h-full min-h-0 flex-col overflow-hidden rounded-panel border border-line bg-white p-5;
+  }
+  .nx-board-head {
+    @apply flex shrink-0 flex-col gap-1 border-b border-line-soft pb-3;
+  }
+  .nx-board-body {
+    @apply -mr-1 min-h-0 flex-1 overflow-y-auto pr-1;
+  }
+  .nx-board-toggle {
+    @apply text-[13px] font-medium text-ink-ghost transition-colors hover:text-ink;
+  }
+
+  /* The orb: a raised cream sphere on the paper canvas, with the
+     waveform sitting inside it. The halo behind it breathes; the sphere
+     itself stays still so the bars are the only thing moving. */
+  .nx-orb {
+    @apply relative grid shrink-0 place-items-center rounded-full;
+    background:
+      radial-gradient(
+        circle at 38% 30%,
+        #ffffff 0%,
+        #fdfcfa 38%,
+        #f2efe8 72%,
+        #ebe7de 100%
+      );
+    box-shadow:
+      0 24px 60px -20px rgba(27, 26, 23, 0.16),
+      0 4px 14px -4px rgba(27, 26, 23, 0.06),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      inset 0 -14px 30px -18px rgba(27, 26, 23, 0.12);
+  }
+  .nx-orb::before {
+    content: "";
+    @apply absolute rounded-full animate-breathe;
+    inset: -12%;
+    z-index: -1;
+    background: radial-gradient(
+      circle at 50% 50%,
+      theme("colors.accent.100") 0%,
+      transparent 68%
+    );
+  }
 }
