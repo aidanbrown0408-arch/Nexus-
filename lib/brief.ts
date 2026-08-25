@@ -74,6 +74,10 @@ export type Brief = {
   priorities: Priority[];
   scheduleNote: string;
   calendarUnavailable?: boolean;
+  // Same idea as calendarUnavailable: unread mail couldn't be fetched
+  // (typically an expired/revoked Google token), so the brief was built
+  // from calendar alone rather than failing outright.
+  mailUnavailable?: boolean;
   newsHighlights?: NewsHighlight[];
   // A written read on markets and world events. Unlike the headlines and
   // the quote tiles — which are passed through verbatim precisely so
@@ -438,7 +442,10 @@ function normalizeTitle(title: string): string {
 // mistake.
 function isDegraded(brief: Brief): boolean {
   return Boolean(
-    brief.calendarUnavailable || brief.newsUnavailable || brief.marketsUnavailable
+    brief.calendarUnavailable ||
+      brief.mailUnavailable ||
+      brief.newsUnavailable ||
+      brief.marketsUnavailable
   );
 }
 
@@ -502,6 +509,9 @@ export async function generateBrief(
   }[] = [];
   let narrowedEvents: EventSummary[] = [];
   let calendarUnavailable = false;
+  // Mirrors calendarUnavailable: a dead Gmail token shouldn't take the
+  // whole brief down when calendar alone is still enough to be useful.
+  let mailUnavailable = false;
   // Unfinished prep for the events in the window, as flat lines Claude
   // can quote back — "the deck isn't sent" is exactly the kind of thing
   // a chief of staff should lead with.
@@ -635,7 +645,13 @@ export async function generateBrief(
       gatherEvents(userId, CALENDAR_DAYS),
     ]);
 
-    if (messagesResult.status === "rejected") throw messagesResult.reason;
+    // Mail is optional here the same way calendar is: a brief built
+    // from calendar alone (or neither) is still worth showing, so a
+    // dead Gmail token degrades the brief instead of failing it.
+    if (messagesResult.status === "rejected") {
+      mailUnavailable = true;
+      console.error("Brief: mail unavailable", errorMessage(messagesResult.reason));
+    }
 
     if (eventsResult.status === "fulfilled") {
       const { events, google, apple } = eventsResult.value;
@@ -680,17 +696,19 @@ export async function generateBrief(
       );
     }
 
-    narrowedEmails = messagesResult.value
-      .filter((m) => m.unread)
-      .slice(0, MAX_UNREAD)
-      .map((m) => ({
-        id: m.id,
-        from: m.from,
-        fromEmail: m.fromEmail,
-        subject: m.subject,
-        snippet: m.snippet.slice(0, SNIPPET_CHARS),
-        date: m.date,
-      }));
+    if (messagesResult.status === "fulfilled") {
+      narrowedEmails = messagesResult.value
+        .filter((m) => m.unread)
+        .slice(0, MAX_UNREAD)
+        .map((m) => ({
+          id: m.id,
+          from: m.from,
+          fromEmail: m.fromEmail,
+          subject: m.subject,
+          snippet: m.snippet.slice(0, SNIPPET_CHARS),
+          date: m.date,
+        }));
+    }
   } catch (err: unknown) {
     console.error("Brief data fetch failed", errorMessage(err));
     const code =
@@ -717,14 +735,20 @@ export async function generateBrief(
     // couldn't be reached.
     const brief: Brief = {
       greeting: "Nothing urgent right now.",
-      headline: calendarUnavailable
-        ? "No unread mail. Your calendar couldn't be reached, so this is your inbox only."
-        : "No unread mail and nothing on your calendar for today or tomorrow.",
+      headline:
+        calendarUnavailable && mailUnavailable
+          ? "Your mail and calendar couldn't be reached, so there's nothing to show."
+          : calendarUnavailable
+            ? "No unread mail. Your calendar couldn't be reached, so this is your inbox only."
+            : mailUnavailable
+              ? "Your mail couldn't be reached. Nothing on your calendar for today or tomorrow."
+              : "No unread mail and nothing on your calendar for today or tomorrow.",
       priorities: [],
       scheduleNote: calendarUnavailable
         ? "Your calendar wasn't available, so nothing here reflects your schedule."
         : "Your next two days are clear.",
       ...(calendarUnavailable ? { calendarUnavailable: true } : {}),
+      ...(mailUnavailable ? { mailUnavailable: true } : {}),
       // Carried on the quiet-day brief too. This is the most likely
       // moment to hit it — an empty inbox is exactly when someone
       // notices the news they asked for isn't there.
@@ -805,7 +829,9 @@ export async function generateBrief(
                   ? `Unfinished prep for those events:\n${JSON.stringify(openPrep, null, 2)}`
                   : "No unfinished prep on those events.",
                 "",
-                `Unread email:\n${JSON.stringify(narrowedEmails, null, 2)}`,
+                mailUnavailable
+                  ? "Email data is unavailable — write the brief from calendar alone and do not refer to unread mail."
+                  : `Unread email:\n${JSON.stringify(narrowedEmails, null, 2)}`,
                 "",
                 narrowedArticles.length
                   ? `News articles. Pick newsHighlights titles from this ` +
@@ -913,6 +939,7 @@ export async function generateBrief(
       priorities: toolUse.input.priorities.slice(0, 5),
       scheduleNote: toolUse.input.scheduleNote,
       ...(calendarUnavailable ? { calendarUnavailable: true } : {}),
+      ...(mailUnavailable ? { mailUnavailable: true } : {}),
       ...(newsHighlights.length ? { newsHighlights } : {}),
       ...(situation ? { situation } : {}),
       ...(newsUnavailable ? { newsUnavailable } : {}),

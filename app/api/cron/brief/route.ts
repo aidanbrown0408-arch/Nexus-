@@ -83,6 +83,7 @@ async function deliver(candidate: DeliveryCandidate, window: DeliveryWindow) {
     // brief says what's missing.
     const outage =
       result.brief.calendarUnavailable ||
+      result.brief.mailUnavailable ||
       result.brief.newsUnavailable === "fetch_failed" ||
       result.brief.marketsUnavailable === "fetch_failed";
     if (outage) {
