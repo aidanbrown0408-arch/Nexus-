@@ -1,22 +1,21 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
-import { currentUser, auth } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { hasSeenOnboarding } from "@/lib/profile";
 import { errorMessage } from "@/lib/supabase";
 import Board from "./Board";
 import TriageSection from "./TriageSection";
 import FiltersSection from "./FiltersSection";
 
-// This page is user-specific (shows the signed-in user's name), so it
-// should never be statically prerendered at build time.
+// This page is user-specific (its content depends on who's signed in),
+// so it should never be statically prerendered at build time.
 export const dynamic = "force-dynamic";
 
 // Server component: middleware.ts already blocks signed-out visitors from
 // ever reaching this route, so by the time this renders we know a user
-// exists. currentUser() reads their profile straight from Clerk.
+// exists.
 export default async function DashboardPage() {
-  const user = await currentUser();
   const { userId } = await auth();
 
   // First visit goes to the interview instead. The check is on the row
