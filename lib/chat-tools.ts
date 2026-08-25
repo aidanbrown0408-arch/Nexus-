@@ -10,7 +10,28 @@ import {
 } from "./gmail";
 import { draftReply } from "./drafts";
 import { actionTarget, logAction, type ActionRecord } from "./actions";
-import { hasScope, GMAIL_COMPOSE_SCOPE, GMAIL_MODIFY_SCOPE } from "./google";
+import {
+  hasScope,
+  GMAIL_COMPOSE_SCOPE,
+  GMAIL_MODIFY_SCOPE,
+  CALENDAR_EVENTS_SCOPE,
+} from "./google";
+import {
+  createEvent,
+  listWritableCalendars,
+  validateEventTimes,
+} from "./calendar-write";
+import {
+  createAppleEvent,
+  getAppleCredentials,
+  listWritableAppleCalendars,
+  type AppleCredentials,
+} from "./apple";
+import {
+  describeRecurrence,
+  parseRecurrence,
+  type Recurrence,
+} from "./recurrence";
 import type { UserProfileRow } from "./profile";
 import { errorMessage } from "./supabase";
 
@@ -24,18 +45,23 @@ import { errorMessage } from "./supabase";
 //   individual, always explicit, and always previewed in full.
 //
 // Chat is a conversation, not a preview. So only the reversible half is
-// exposed: draft, archive, label. Every one of them writes to the action
-// log with the operation that undoes it, so anything done in a sentence
-// can be undone in a click.
+// exposed: draft, archive, label, and — as of create_event — adding an
+// event with nobody invited to it. A guest-free create is a clean
+// reversal (deleteEvent on an event nobody else has touched yet, the
+// same undo every dashboard create already gets), which is why it
+// belongs here even though creating an event sounds like the sort of
+// thing that should need a preview.
 //
 // Deliberately absent, and not by oversight:
 //
 //   - Sending mail. Nexus has never had the scope and this is not the
 //     feature that should introduce it.
 //   - Deleting or trashing anything.
-//   - Creating calendar events. They notify other people, which makes
-//     them irreversible in the way that matters — the invitation has
-//     already arrived.
+//   - Inviting guests to an event. That notifies other people, which
+//     makes it irreversible in the way that matters — the invitation
+//     has already arrived. create_event has no attendees field at all,
+//     not a validated one, so there's no path for the model to invite
+//     anyone even by accident.
 //
 // Those belong behind an explicit confirm, which is a UI, not a tool.
 
@@ -124,6 +150,86 @@ export const CHAT_TOOLS = [
       required: ["messageIds", "label"],
     },
   },
+  {
+    name: "create_event",
+    description:
+      "Add an event to the user's Google or iCloud calendar. Never " +
+      "invites anyone — there is no way to pass guests to this tool, so " +
+      "use it freely for personal appointments, classes, blocked time, " +
+      "reminders, anything with nobody else on it. If the user wants " +
+      "guests invited, tell them to add it from the dashboard instead of " +
+      "using this tool. When the event repeats on a regular pattern " +
+      "(a class that meets certain weekdays, 'every Monday', 'daily " +
+      "until the 20th'), pass recurrence so it's created as one series " +
+      "rather than asking you to create each date separately.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        summary: { type: "string", description: "The event's title." },
+        start: {
+          type: "string",
+          description:
+            "Start of the first (or only) occurrence, as a local " +
+            "date-time like '2026-08-26T08:20:00'. A bare date " +
+            "('2026-08-26') for an all-day event.",
+        },
+        end: {
+          type: "string",
+          description: "End of the first occurrence, same format as start.",
+        },
+        allDay: {
+          type: "boolean",
+          description: "True for an all-day event. Defaults to false.",
+        },
+        location: {
+          type: "string",
+          description: "Where it is, if known. Optional.",
+        },
+        calendar: {
+          type: "string",
+          description:
+            "Which calendar to put it on, matching the `calendar` name " +
+            "shown on one of the user's existing events (e.g. 'School', " +
+            "'Work'). Omit to use their default calendar.",
+        },
+        recurrence: {
+          type: "object",
+          description:
+            "Omit for a one-off event. Otherwise describes the repeat " +
+            "rule for a series starting at `start`.",
+          properties: {
+            frequency: {
+              type: "string",
+              enum: ["daily", "weekly", "monthly", "yearly"],
+            },
+            interval: {
+              type: "number",
+              description: "Every N units — 2 for 'every other week'. Defaults to 1.",
+            },
+            byDay: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+              },
+              description:
+                "For a weekly rule that meets specific weekdays, e.g. a " +
+                "class on Wed/Thu/Fri: ['WE','TH','FR'].",
+            },
+            count: {
+              type: "number",
+              description: "Number of occurrences. Use this or `until`, not both.",
+            },
+            until: {
+              type: "string",
+              description: "Last possible date, YYYY-MM-DD, inclusive.",
+            },
+          },
+        },
+      },
+      required: ["summary", "start", "end"],
+    },
+  },
 ];
 
 // Ids come from a model that was handed a list of them. It can still
@@ -138,6 +244,65 @@ function knownIds(requested: unknown, known: Set<string>): string[] {
     }
   }
   return ids;
+}
+
+// Pick which calendar create_event lands on. `wanted` is whatever name
+// the model passed (possibly empty); matched case-insensitively against
+// both services rather than just Google, since a user's "School"
+// calendar is just as likely to be the iCloud one. No match, or no name
+// given at all, falls back to the user's primary Google calendar — the
+// same default the dashboard form refuses to guess, but a chat tool
+// with no calendar picker in front of it has to land somewhere.
+async function pickCalendar(
+  userId: string,
+  client: OAuth2Client,
+  wanted: string
+): Promise<
+  | { source: "google"; id: string; name: string }
+  | { source: "apple"; id: string; name: string; credentials: AppleCredentials }
+  | null
+> {
+  const googleCalendars = await listWritableCalendars(client).catch(() => []);
+
+  let appleCredentials: AppleCredentials | null = null;
+  try {
+    appleCredentials = await getAppleCredentials(userId);
+  } catch {
+    // Apple simply isn't in play for this pick.
+  }
+  const appleCalendars = appleCredentials
+    ? await listWritableAppleCalendars(appleCredentials).catch(() => [])
+    : [];
+
+  if (wanted) {
+    const needle = wanted.toLowerCase();
+    const google = googleCalendars.find((c) => c.name.toLowerCase() === needle);
+    if (google) return { source: "google", id: google.id, name: google.name };
+    const apple = appleCalendars.find((c) => c.name.toLowerCase() === needle);
+    if (apple && appleCredentials) {
+      return {
+        source: "apple",
+        id: apple.url,
+        name: apple.name,
+        credentials: appleCredentials,
+      };
+    }
+  }
+
+  const primary = googleCalendars.find((c) => c.primary) ?? googleCalendars[0];
+  if (primary) return { source: "google", id: primary.id, name: primary.name };
+
+  const fallbackApple = appleCalendars[0];
+  if (fallbackApple && appleCredentials) {
+    return {
+      source: "apple",
+      id: fallbackApple.url,
+      name: fallbackApple.name,
+      credentials: appleCredentials,
+    };
+  }
+
+  return null;
 }
 
 export async function runChatTool(
@@ -238,6 +403,114 @@ export async function runChatTool(
       });
 
       return { result: `Labelled ${ids.length} as "${label.name}".`, action };
+    }
+
+    if (name === "create_event") {
+      const summary = String(input.summary ?? "").trim().slice(0, 200);
+      if (!summary) return { result: "No event title given." };
+
+      const start = typeof input.start === "string" ? input.start : "";
+      const end = typeof input.end === "string" ? input.end : "";
+      if (!start || !end) {
+        return { result: "Need both a start and an end time." };
+      }
+
+      const allDay = input.allDay === true;
+      const invalidTimes = validateEventTimes(start, end, allDay);
+      if (invalidTimes) return { result: invalidTimes };
+
+      const location =
+        typeof input.location === "string" && input.location.trim()
+          ? input.location.trim().slice(0, 2000)
+          : undefined;
+
+      let recurrence: Recurrence | null = null;
+      if (input.recurrence) {
+        recurrence = parseRecurrence(input.recurrence);
+        if (!recurrence) {
+          return {
+            result:
+              "That repeat rule didn't parse — describe it more simply " +
+              "(e.g. weekly on specific weekdays, with a count or an end " +
+              "date), or ask the user to set it up from the dashboard.",
+          };
+        }
+      }
+
+      const wanted =
+        typeof input.calendar === "string" ? input.calendar.trim() : "";
+      const target = await pickCalendar(userId, client, wanted);
+      if (!target) {
+        if (!hasScope(client.credentials.scope, CALENDAR_EVENTS_SCOPE)) {
+          return {
+            result:
+              "Nexus doesn't have permission to add calendar events yet " +
+              "— the user needs to reconnect Google.",
+          };
+        }
+        return {
+          result:
+            "No writable calendar found — the user needs to connect " +
+            "Google or iCloud Calendar first.",
+        };
+      }
+
+      const repeatsSuffix = recurrence
+        ? ` — ${describeRecurrence(recurrence).toLowerCase()}`
+        : "";
+
+      if (target.source === "google") {
+        if (!hasScope(client.credentials.scope, CALENDAR_EVENTS_SCOPE)) {
+          return {
+            result:
+              "Nexus doesn't have permission to add calendar events yet " +
+              "— the user needs to reconnect Google.",
+          };
+        }
+        const event = await createEvent(client, {
+          summary,
+          start,
+          end,
+          allDay,
+          location,
+          calendarId: target.id,
+          recurrence: recurrence ?? undefined,
+        });
+        const action = await logAction(userId, {
+          kind: "event_create",
+          summary: `Added "${event.summary}" to ${target.name}${repeatsSuffix}`,
+          target: {
+            eventId: event.id,
+            calendarId: event.calendarId,
+            source: "google",
+          },
+          undo: "delete_event",
+        });
+        return {
+          result: `Added "${event.summary}" to ${target.name}${repeatsSuffix}.`,
+          action,
+        };
+      }
+
+      const created = await createAppleEvent(target.credentials, {
+        calendarUrl: target.id,
+        summary,
+        start,
+        end,
+        allDay,
+        location,
+        recurrence: recurrence ?? undefined,
+      });
+      const action = await logAction(userId, {
+        kind: "event_create",
+        summary: `Added "${summary}" to ${target.name}${repeatsSuffix}`,
+        target: { objectUrl: created.objectUrl, source: "apple" },
+        undo: "delete_event",
+      });
+      return {
+        result: `Added "${summary}" to ${target.name}${repeatsSuffix}.`,
+        action,
+      };
     }
 
     return { result: `Unknown tool: ${name}` };
