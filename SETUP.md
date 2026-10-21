@@ -1000,23 +1000,23 @@ yourself.
 
 ### 6d. Deploying the schedule
 
-`vercel.json` declares the cron as `"0 * * * *"` — **hourly**, which is
-what `lib/schedule.ts` assumes: it only opens a delivery window within
-`GRACE_HOURS` (3) of each user's chosen `morning_time`, in their own
-timezone. Vercel reads it on deploy; there is nothing to configure in the
-dashboard.
+`lib/schedule.ts` only opens a delivery window within `GRACE_HOURS` (3)
+of each user's chosen `morning_time`, in their own timezone, so
+`/api/cron/brief` has to be called **hourly**. Two things call it:
 
-Hourly cron needs Vercel **Pro**. (Pro is required for a commercial
-launch anyway — the Hobby plan is for personal, non-commercial use.) If
-you stay on Hobby, Vercel will reject an hourly schedule: set it back to
-once a day and point an external scheduler (GitHub Actions,
-cron-job.org) at the same URL hourly with the
-`Authorization: Bearer $CRON_SECRET` header. The route is idempotent per
-user per day, so an extra call costs nothing.
+- **`.github/workflows/brief-cron.yml`** — GitHub Actions, hourly, free.
+  Add two repository secrets: `NEXUS_APP_URL` (the production URL) and
+  `CRON_SECRET` (same value as in Vercel). Until both exist it skips.
+- **`vercel.json`** — a once-daily Vercel cron (`"0 12 * * *"`) as a
+  fallback. Vercel's Hobby plan rejects anything more frequent — the
+  deployment fails with "Hobby accounts are limited to daily cron
+  jobs". On **Pro** (which a commercial launch needs anyway) change it
+  to `"0 * * * *"` and delete the GitHub workflow.
 
-If the schedule is ever less than hourly, the cron logs `notDue` on every
-run and returns it in the response body — a large `notDue` with a small,
-unchanging `due` means most users are being skipped.
+The route is idempotent per user per day, so the two overlapping costs
+nothing. If the route is ever called less than hourly, it logs `notDue`
+on every run and returns it in the response body — a large `notDue` with
+a small, unchanging `due` means most users are being skipped.
 
 ### 6e. Testing it without waiting for morning
 

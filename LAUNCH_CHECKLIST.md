@@ -18,8 +18,11 @@ settings and paperwork only you can do.
       and a written justification per scope.
       *Worth considering:* dropping any scope you can live without shortens
       the review.
-- [ ] **Vercel Pro.** Hobby is non-commercial only, and the hourly brief
-      cron in `vercel.json` needs Pro.
+- [ ] **Vercel Pro.** Hobby is for non-commercial use only. Once on Pro,
+      set `vercel.json`'s cron to `"0 * * * *"` and delete
+      `.github/workflows/brief-cron.yml`.
+- [ ] **Hourly brief trigger (until Pro):** add GitHub repository secrets
+      `NEXUS_APP_URL` and `CRON_SECRET` so the hourly GitHub Action runs.
 - [ ] **Clerk production instance** with your domain; swap in `pk_live_` /
       `sk_live_` keys. Configure Google as a sign-in provider there with
       your own OAuth credentials.
@@ -75,7 +78,8 @@ settings and paperwork only you can do.
   deletes the Clerk user (required by Google's user-data policy).
 - **Per-user rate limits** on every route that costs money per call.
 - RLS fix for `brief_cache` / `brief_deliveries` (migration 003).
-- Brief cron fixed to run hourly, matching the scheduler's design.
+- Brief is triggered hourly (GitHub Action; Vercel cron daily fallback
+  until Pro), matching the scheduler's design.
 - Security headers, privacy and terms pages, 404 / error pages,
   `robots.txt`, `sitemap.xml`, Open Graph base URL.
 - Clerk theme variables updated to the v7 names (the old ones were being

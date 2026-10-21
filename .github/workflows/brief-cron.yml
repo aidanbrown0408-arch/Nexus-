@@ -1,0 +1,37 @@
+# Triggers the scheduled morning brief every hour.
+#
+# lib/schedule.ts only sends a brief within a few hours of each user's
+# chosen morning, in their own timezone, so the route has to be called
+# hourly. Vercel's Hobby plan only allows daily cron jobs (vercel.json
+# keeps one as a fallback); this does the hourly calls for free. On
+# Vercel Pro you can set vercel.json to "0 * * * *" and delete this file.
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   NEXUS_APP_URL  — the production URL, e.g. https://nexus.example.com
+#   CRON_SECRET    — the same value as CRON_SECRET in Vercel
+# Until both exist the job does nothing. The route is idempotent per user
+# per day, so overlapping with the Vercel cron costs nothing.
+name: Hourly brief
+
+on:
+  schedule:
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/cron/brief
+        env:
+          APP_URL: ${{ secrets.NEXUS_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "NEXUS_APP_URL or CRON_SECRET not set — skipping."
+            exit 0
+          fi
+          curl --fail-with-body -sS --max-time 320 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/brief"
