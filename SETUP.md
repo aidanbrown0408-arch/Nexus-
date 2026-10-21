@@ -82,12 +82,21 @@ Claude has already drafted for.
 create table if not exists public.prep_items (
   id            uuid primary key default gen_random_uuid(),
   user_id       text not null,
-  event_key     text not null,
+  -- Null for a reminder that belongs to no meeting — "call the dentist".
+  event_key     text,
   event_summary text,
   event_start   timestamptz,
   title         text not null,
   done          boolean not null default false,
   origin        text not null default 'user' check (origin in ('claude', 'user')),
+  -- The item's own date. Read first; event_start is the fallback, so an
+  -- event-linked item with no due_at is simply due when the event is.
+  due_at        timestamptz,
+  source        text not null default 'event'
+                  check (source in ('event', 'manual', 'chat', 'email')),
+  -- Whatever the source needs to point back at itself: a Gmail message
+  -- and thread id, for now. Shapeless like action_log.target.
+  source_ref    jsonb,
   position      int not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -95,6 +104,9 @@ create table if not exists public.prep_items (
 
 create index if not exists prep_items_user_event_idx
   on public.prep_items (user_id, event_key);
+
+create index if not exists prep_items_user_due_idx
+  on public.prep_items (user_id, due_at);
 
 create table if not exists public.prep_generations (
   user_id      text not null,
@@ -125,13 +137,14 @@ create table if not exists public.action_log (
   user_id    text not null,
   kind       text not null
                check (kind in ('draft_reply', 'archive', 'label', 'filter',
-                               'trash', 'event_create', 'event_delete')),
+                               'trash', 'event_create', 'event_delete',
+                               'task_create')),
   summary    text not null,
   target     jsonb not null default '{}'::jsonb,
   undo       text not null default 'none'
                check (undo in ('delete_draft', 'unarchive', 'remove_label',
                                'remove_filter', 'untrash', 'delete_event',
-                               'restore_event', 'none')),
+                               'restore_event', 'delete_task', 'none')),
   undone_at  timestamptz,
   created_at timestamptz not null default now()
 );
@@ -966,7 +979,32 @@ yourself.
 
 ### 6d. Deploying the schedule
 
-`vercel.json` declares the hourly cron. Vercel reads it on deploy; there
+> **The schedule in `vercel.json` and the schedule this code assumes do
+> not currently match.** `vercel.json` says `"0 12 * * *"` — once a day
+> at 12:00 UTC. `lib/schedule.ts` only returns a delivery window within
+> `GRACE_HOURS` (3) of a user's chosen `morning_time`, which assumes
+> this route is invoked **hourly**.
+>
+> With a once-daily run, the only users ever served are those whose
+> morning falls in the 09:00–12:00 UTC band. A New York user who chose
+> 9am (13:00 UTC) and a Tokyo user who chose 7am (22:00 UTC previous
+> day) are skipped on every run, silently and permanently.
+>
+> Two ways out, and they are a plan decision rather than a code one:
+>
+> - **Hourly cron** — change the schedule to `"0 * * * *"`. This is what
+>   the code is built for. Vercel's Hobby plan caps cron invocations at
+>   one per day, so this needs Pro.
+> - **External hourly pinger** — leave Vercel's cron off (or daily) and
+>   hit the same URL hourly from GitHub Actions, cron-job.org, or any
+>   scheduler, with the `Authorization: Bearer $CRON_SECRET` header. The
+>   route is idempotent per user per day, so an extra call costs nothing.
+>
+> Until one of those is in place, the cron logs `notDue` on every run and
+> returns it in the response body — if that number is large and `due` is
+> a small unchanging set, this is why.
+
+`vercel.json` declares the cron. Vercel reads it on deploy; there
 is nothing to configure in the dashboard. On the Hobby plan cron runs are
 once-daily and the timing is approximate, so an hourly schedule needs a
 Pro plan — on Hobby, either accept one fixed hour for everyone or point

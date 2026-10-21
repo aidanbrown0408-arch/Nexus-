@@ -5,12 +5,17 @@ import GuestPicker, { type Guest } from "./GuestPicker";
 import FindTime from "./FindTime";
 import RepeatPicker from "./RepeatPicker";
 import { describeRecurrence, type Recurrence } from "@/lib/recurrence";
+import { toDayKey } from "@/lib/event-days";
 
 // Putting something on the calendar.
 //
 // Collapsed to a single link until asked for — the Upcoming card is for
 // reading what's coming, and a permanent form at the top of it would make
-// the common case worse to serve the rarer one.
+// the common case worse to serve the rarer one. Open/closed is owned by
+// the parent rather than kept locally, though: clicking an empty slot in
+// the week or month grid needs to open this same form pre-filled with
+// the date (and time) that was clicked, and a form that only knew how to
+// open itself with today's defaults couldn't do that.
 //
 // Guests are the one field here that reaches other people, so it stays
 // empty by default and the button says plainly when invites will go out.
@@ -22,7 +27,16 @@ import { describeRecurrence, type Recurrence } from "@/lib/recurrence";
 // with access has already seen it.
 
 type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onCreated: () => void;
+  // What to prefill the form with when it opens — set by a grid click.
+  // Left undefined for the plain "+ Add an event" link, which falls back
+  // to "today, an hour from now".
+  initialDate?: string;
+  initialStartTime?: string;
+  initialEndTime?: string;
+  initialAllDay?: boolean;
 };
 
 type Target = {
@@ -32,9 +46,13 @@ type Target = {
   primary: boolean;
 };
 
+// The form's date field is a local calendar date, so it has to be built
+// from local parts. `toISOString()` converts to UTC first, which from
+// early evening onwards in the Americas returns *tomorrow* — so opening
+// "New event" at 9pm pre-filled the next day while the time field,
+// built from `toTimeString()`, stayed local. The two disagreed by a day.
 function defaultDate(): string {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return toDayKey(new Date());
 }
 
 function defaultTime(offsetHours: number): string {
@@ -43,8 +61,15 @@ function defaultTime(offsetHours: number): string {
   return d.toTimeString().slice(0, 5);
 }
 
-export default function AddEventForm({ onCreated }: Props) {
-  const [open, setOpen] = useState(false);
+export default function AddEventForm({
+  open,
+  onOpenChange,
+  onCreated,
+  initialDate,
+  initialStartTime,
+  initialEndTime,
+  initialAllDay,
+}: Props) {
   const [summary, setSummary] = useState("");
   const [date, setDate] = useState(defaultDate);
   const [startTime, setStartTime] = useState(() => defaultTime(1));
@@ -75,6 +100,28 @@ export default function AddEventForm({ onCreated }: Props) {
   // iCloud invitations mean iTIP scheduling, which the API refuses. Say
   // so while they're picking rather than on submit.
   const guestsUnsupported = selected?.source === "apple" && guests.length > 0;
+
+  // Every time the form opens, load its date/time from whatever the
+  // caller asked for — a grid click — or fall back to the old "today, an
+  // hour from now" defaults for the plain link. Runs on `open` alone:
+  // the initial* props are only meaningful at the moment of opening, and
+  // re-running this whenever the parent re-renders with a new (but
+  // equivalent) prefill object would stomp on whatever the person is
+  // mid-typing.
+  useEffect(() => {
+    if (!open) return;
+    setSummary("");
+    setLocation("");
+    setGuests([]);
+    setRecurrence(null);
+    setError(null);
+    setNeedsReconnect(false);
+    setDate(initialDate ?? defaultDate());
+    setAllDay(initialAllDay ?? false);
+    setStartTime(initialStartTime ?? defaultTime(1));
+    setEndTime(initialEndTime ?? defaultTime(2));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Fetched when the form opens rather than on mount — most dashboard
   // visits never add an event, and this is two network calls against two
@@ -122,19 +169,6 @@ export default function AddEventForm({ onCreated }: Props) {
     };
   }, [open]);
 
-  function reset() {
-    setSummary("");
-    setLocation("");
-    setGuests([]);
-    setRecurrence(null);
-    setAllDay(false);
-    setError(null);
-    setNeedsReconnect(false);
-    // Target is deliberately not reset — within one session, adding two
-    // events to the same calendar is the common case, and re-picking
-    // every time is friction without a safety payoff.
-  }
-
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!summary.trim() || !selected || guestsUnsupported) return;
@@ -172,6 +206,9 @@ export default function AddEventForm({ onCreated }: Props) {
         return;
       }
 
+      // Left open on success, showing the confirmation below — closing
+      // the instant the request resolves would yank the modal away
+      // before anyone could read "added to Work" or reach for Undo.
       setCreated({
         summary: summary.trim(),
         calendarName: selected.name,
@@ -179,8 +216,6 @@ export default function AddEventForm({ onCreated }: Props) {
         actionId: body.actionId ?? null,
         htmlLink: body.event?.htmlLink ?? null,
       });
-      reset();
-      setOpen(false);
       onCreated();
     } catch {
       setError("Couldn't reach Nexus. Try again.");
@@ -233,7 +268,10 @@ export default function AddEventForm({ onCreated }: Props) {
           )}
           <button
             type="button"
-            onClick={() => setCreated(null)}
+            onClick={() => {
+              setCreated(null);
+              onOpenChange(false);
+            }}
             className="ml-auto text-xs text-emerald-700"
           >
             Dismiss
@@ -247,7 +285,7 @@ export default function AddEventForm({ onCreated }: Props) {
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => onOpenChange(true)}
         className="mt-3 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
       >
         + Add an event
@@ -408,7 +446,7 @@ export default function AddEventForm({ onCreated }: Props) {
         <button
           type="submit"
           disabled={saving || !summary.trim() || !selected || guestsUnsupported}
-          className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving
             ? "Adding…"
@@ -422,11 +460,8 @@ export default function AddEventForm({ onCreated }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            setOpen(false);
-            reset();
-          }}
-          className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
+          onClick={() => onOpenChange(false)}
+          className="rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
         >
           Cancel
         </button>

@@ -1,9 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { PanelIcon, PanelIconButton } from "./PanelActions";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppleConnectForm from "./AppleConnectForm";
 import AddEventForm from "./AddEventForm";
-import EventRow, { formatDay } from "./EventRow";
+import EventRow from "./EventRow";
+import WeekView from "./WeekView";
+import MonthView from "./MonthView";
+import AgendaView from "./AgendaView";
+import RemindersSection from "./RemindersSection";
+import CalendarModal from "./CalendarModal";
+import { buildCalendarPalette, calendarLabel, colorFor, type CalendarColor } from "./calendarColors";
 import type { EventSummary } from "@/lib/events";
 import type { PrepItem } from "@/lib/prep";
 
@@ -16,6 +23,7 @@ type SourceStatus =
   | "ok"
   | "not_connected"
   | "scope_missing"
+  | "auth_expired"
   | "auth_failed"
   | "error";
 
@@ -27,19 +35,30 @@ type Status =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-const RANGE_OPTIONS = [7, 30, 90] as const;
+const RANGE_OPTIONS = [1, 7, 30, 90] as const;
 
-const RANGE_SHORT: Record<(typeof RANGE_OPTIONS)[number], string> = {
+type Range = (typeof RANGE_OPTIONS)[number];
+
+const RANGE_SHORT: Record<Range, string> = {
+  1: "Day",
   7: "Week",
   30: "Month",
-  90: "3 months",
+  90: "3 mo",
 };
 
-const RANGE_LABEL: Record<(typeof RANGE_OPTIONS)[number], string> = {
+// How the window gets named in a sentence — "Next 7 days" works, "Next 1
+// days" does not, so Day gets its own wording throughout.
+const RANGE_LABEL: Record<Range, string> = {
+  1: "today",
   7: "7 days",
   30: "30 days",
   90: "90 days",
 };
+
+// The same window as a heading. "Next today" is not a phrase.
+function rangeHeading(days: Range): string {
+  return days === 1 ? "Today" : `Next ${RANGE_LABEL[days]}`;
+}
 
 export default function CalendarSection({
   focused = false,
@@ -52,9 +71,14 @@ export default function CalendarSection({
   focused?: boolean;
   onToggleFocus?: () => void;
 } = {}) {
+  // Which half of the panel is showing. Reminders are event-scoped, so
+  // they belong in the same panel as the events rather than competing for
+  // a fourth column the board doesn't have.
+  const [tab, setTab] = useState<"calendar" | "reminders">("calendar");
+
   // The window the card is showing. Whitelisted server-side too — this
   // value reaches a Google API call and an iCloud time-range query.
-  const [days, setDays] = useState<7 | 30 | 90>(7);
+  const [days, setDays] = useState<Range>(7);
   const [truncated, setTruncated] = useState(false);
   // Same Expand / Collapse affordance the Inbox panel has.
   const [expanded, setExpanded] = useState(true);
@@ -69,9 +93,17 @@ export default function CalendarSection({
   // last and paint three months of events under a "next 7 days" heading,
   // with a truncation banner belonging to the other request.
   const requestId = useRef(0);
+  // When the newest request last came back, so a refresh triggered by
+  // tabbing back to the page can skip the round-trip if it just ran.
+  const lastFetchedAt = useRef(0);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [sources, setSources] = useState<Sources | null>(null);
+  // Google can list a calendar it isn't allowed to change — two separate
+  // consents on one screen. Tracked so the panel can say so up front
+  // rather than letting a Delete click discover it.
+  const [googleCanWrite, setGoogleCanWrite] = useState(true);
   // Prep lives here rather than inside each row so it survives a refresh
   // and so the header can count what's outstanding across the week.
   const [prep, setPrep] = useState<Record<string, PrepItem[]>>({});
@@ -79,6 +111,75 @@ export default function CalendarSection({
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [showAppleForm, setShowAppleForm] = useState(false);
+  // The grid views (week/month) don't have room for a full row's worth
+  // of prep checklist and edit controls, so clicking an event there just
+  // selects it — the detail panel below renders the same EventRow the
+  // agenda list uses, with everything it already knows how to do.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // A different window means a different grid — the previously selected
+  // event may not even be on screen anymore.
+  useEffect(() => {
+    setSelectedKey(null);
+  }, [days]);
+
+  // The add form's open/prefill state lives here, not inside the form
+  // itself, so a click on an empty slot in Week or Month can hand it a
+  // date (and, in Week, a time) to start from — the same form the plain
+  // "+ Add an event" link opens, just already pointed at what was
+  // clicked.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addPrefill, setAddPrefill] = useState<{
+    date: string;
+    startTime?: string;
+    endTime?: string;
+    allDay?: boolean;
+  } | null>(null);
+
+  // Both open in a modal now — dead center over the panel the instant
+  // they're triggered, rather than appended below the grid where seeing
+  // them meant scrolling past it. That means only one of "adding" and
+  // "looking at an event" can be on screen at once, so each closes the
+  // other.
+  const closeAdd = useCallback(() => {
+    setAddOpen(false);
+    setAddPrefill(null);
+  }, []);
+
+  const openAddAt = useCallback(
+    (date: Date, time?: { hour: number; minute: number }) => {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const dateStr = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+        date.getDate()
+      )}`;
+      if (time) {
+        const end = new Date(date);
+        // A default hour-long slot — setHours rolls the minutes over
+        // into the next hour on its own when they overflow past 60.
+        end.setHours(time.hour, time.minute + 60, 0, 0);
+        setAddPrefill({
+          date: dateStr,
+          startTime: `${pad(time.hour)}:${pad(time.minute)}`,
+          endTime: `${pad(end.getHours())}:${pad(end.getMinutes())}`,
+          allDay: false,
+        });
+      } else {
+        setAddPrefill({ date: dateStr });
+      }
+      setSelectedKey(null);
+      setAddOpen(true);
+    },
+    []
+  );
+
+  // The plain "add an event" trigger — the top-of-panel button and the
+  // one on the collapsed preview — has no clicked date to start from, so
+  // the form falls back to its own "today, an hour from now" defaults.
+  const openAddBlank = useCallback(() => {
+    setAddPrefill(null);
+    setSelectedKey(null);
+    setAddOpen(true);
+  }, []);
 
   const fetchEvents = useCallback(async () => {
     const id = ++requestId.current;
@@ -109,6 +210,7 @@ export default function CalendarSection({
       const body = (await res.json()) as {
         events: EventSummary[];
         sources: Sources;
+        googleCanWrite?: boolean;
         prep: Record<string, PrepItem[]>;
         generated: string[];
         truncated?: boolean;
@@ -116,10 +218,13 @@ export default function CalendarSection({
       if (!isCurrent()) return;
       setEvents(body.events ?? []);
       setSources(body.sources);
+      setGoogleCanWrite(body.googleCanWrite !== false);
       setPrep(body.prep ?? {});
       setGenerated(new Set(body.generated ?? []));
       setTruncated(Boolean(body.truncated));
       setStatus({ kind: "ready" });
+      lastFetchedAt.current = Date.now();
+      setUpdatedAt(new Date());
     } catch (err) {
       if (!isCurrent()) return;
       setEventsError(
@@ -138,6 +243,41 @@ export default function CalendarSection({
   // window changes, which is what makes the range buttons work.
   useEffect(() => {
     fetchEvents();
+  }, [fetchEvents]);
+
+  // Nothing pushes changes at this panel. Google and iCloud are both
+  // polled, so an event you moved in Calendar.app on your phone reaches
+  // the board only when the board asks again — and it used to ask
+  // exactly once, on mount. Anyone leaving a tab open saw a stale week
+  // and no way to tell it was stale.
+  //
+  // So: ask again whenever the tab comes back to the foreground, and on
+  // a slow timer while it's there. The timer is deliberately five
+  // minutes rather than seconds — a CalDAV round trip across every
+  // iCloud calendar is not cheap, and iCloud rate-limits. The focus
+  // check is what actually makes it feel live, since a change made on
+  // your phone is one you come back to the tab to look at.
+  useEffect(() => {
+    const POLL_MS = 5 * 60 * 1000;
+    // A tab that's focused and blurred repeatedly shouldn't fire a
+    // request each time.
+    const MIN_GAP_MS = 30 * 1000;
+
+    function refresh(force: boolean) {
+      if (document.visibilityState !== "visible") return;
+      if (!force && Date.now() - lastFetchedAt.current < MIN_GAP_MS) return;
+      fetchEvents();
+    }
+
+    const onFocus = () => refresh(false);
+    const timer = window.setInterval(() => refresh(true), POLL_MS);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
   }, [fetchEvents]);
 
   const handleItemsChange = useCallback(
@@ -170,10 +310,14 @@ export default function CalendarSection({
     []
   );
 
-  const handleDeleted = useCallback((eventKey: string, seriesId?: string) => {
-    setEvents((current) => {
+  // Reads `events` rather than deriving the doomed set inside a
+  // setEvents updater. Updaters have to be pure — React calls them twice
+  // in development, and this one was firing setPrep and setSelectedKey
+  // from inside itself each time.
+  const handleDeleted = useCallback(
+    (eventKey: string, seriesId?: string) => {
       const doomed = new Set(
-        current
+        events
           .filter((e) =>
             seriesId ? e.recurringEventId === seriesId : e.key === eventKey
           )
@@ -181,15 +325,18 @@ export default function CalendarSection({
       );
       doomed.add(eventKey);
 
+      setEvents((current) => current.filter((e) => !doomed.has(e.key)));
       setPrep((prepState) => {
         const next = { ...prepState };
         doomed.forEach((key) => delete next[key]);
         return next;
       });
-
-      return current.filter((e) => !doomed.has(e.key));
-    });
-  }, []);
+      setSelectedKey((current) =>
+        current && doomed.has(current) ? null : current
+      );
+    },
+    [events]
+  );
 
   const disconnectApple = useCallback(async () => {
     await fetch("/api/apple/disconnect", { method: "POST" });
@@ -201,60 +348,116 @@ export default function CalendarSection({
 
   // Only counts prep for events still on screen — an item attached to an
   // event that has since passed shouldn't keep nagging from the header.
-  // Events arrive as one flat, already-sorted list; the board wants them
-  // bucketed under Today / Tomorrow / a weekday. Insertion order into the
-  // Map preserves the sort, so the groups come out chronological too.
-  const dayGroups = (() => {
-    const buckets = new Map<string, EventSummary[]>();
-    for (const event of events) {
-      const day = formatDay(event.start) || "Later";
-      const bucket = buckets.get(day);
-      if (bucket) bucket.push(event);
-      else buckets.set(day, [event]);
-    }
-    return Array.from(buckets, ([day, list]) => ({ day, events: list }));
-  })();
-
   const openPrepCount = events.reduce(
     (total, event) =>
       total + (prep[event.key] ?? []).filter((item) => !item.done).length,
     0
   );
 
+  // One color per calendar name — built once here, from whatever is
+  // actually on screen, so Week and Month (and the legend below) all
+  // agree on which color belongs to which calendar.
+  const calendarPalette = useMemo(() => buildCalendarPalette(events), [events]);
+  const calendarLegend = useMemo(() => {
+    const seen = new Map<string, CalendarColor>();
+    for (const event of events) {
+      const label = calendarLabel(event);
+      const color = calendarPalette.get(label);
+      if (!seen.has(label) && color) seen.set(label, color);
+    }
+    return Array.from(seen, ([label, color]) => ({ label, color })).sort((a, b) =>
+      a.label.localeCompare(b.label)
+    );
+  }, [events, calendarPalette]);
+
+  // Toggling the same event closes its detail modal again — a second
+  // click reads as "never mind" rather than a no-op. Opening one also
+  // closes any pending add, so the two modals never compete.
+  const toggleSelected = useCallback((key: string) => {
+    setAddOpen(false);
+    setAddPrefill(null);
+    setSelectedKey((current) => (current === key ? null : key));
+  }, []);
+
+  const selectedEvent = selectedKey
+    ? events.find((e) => e.key === selectedKey) ?? null
+    : null;
+
   return (
     <section className="nx-board-panel">
       <header className="nx-board-head">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <h2 className="shrink-0 text-base font-semibold tracking-tight text-ink">
-            Calendar
-          </h2>
-          <div className="flex shrink-0 items-center gap-3.5">
-            {onToggleFocus && (
+          <div
+            role="group"
+            aria-label="Calendar or reminders"
+            className="flex shrink-0 items-baseline gap-3"
+          >
+            {(["calendar", "reminders"] as const).map((name) => (
               <button
+                key={name}
                 type="button"
-                onClick={onToggleFocus}
-                aria-pressed={focused}
-                className="nx-board-toggle"
+                onClick={() => setTab(name)}
+                aria-pressed={tab === name}
+                className={`text-[17px] font-semibold tracking-tight transition-colors ${
+                  tab === name
+                    ? "text-ink"
+                    : "text-ink-wisp hover:text-ink-muted"
+                }`}
               >
-                {focused ? "Exit full screen" : "Full screen"}
+                {name === "calendar" ? "Calendar" : "Reminders"}
+                {/* The count rides on the tab you aren't looking at —
+                    that's the whole reason to glance over. */}
+                {name === "reminders" && openPrepCount > 0 && (
+                  <span className="ml-1.5 rounded-md bg-surface-muted px-1.5 py-0.5 align-middle text-[12px] font-semibold leading-none text-ink-muted">
+                    {openPrepCount}
+                  </span>
+                )}
               </button>
+            ))}
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {status.kind === "ready" && tab === "calendar" && (
+              <PanelIconButton
+                icon="refresh"
+                label={
+                  loadingEvents
+                    ? "Refreshing…"
+                    : updatedAt
+                      ? `Refresh · updated ${updatedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                      : "Refresh calendar"
+                }
+                onClick={fetchEvents}
+                disabled={loadingEvents}
+                spinning={loadingEvents}
+              />
             )}
-            <button
-              type="button"
+            {onToggleFocus && (
+              <PanelIconButton
+                icon={focused ? "minimize" : "maximize"}
+                label={focused ? "Exit full screen" : "Full screen"}
+                onClick={onToggleFocus}
+                pressed={focused}
+              />
+            )}
+            <PanelIconButton
+              icon={expanded ? "chevron-up" : "chevron-down"}
+              label={expanded ? "Collapse" : "Expand"}
               onClick={() => setExpanded((v) => !v)}
-              aria-expanded={expanded}
-              className="nx-board-toggle"
-            >
-              {expanded ? "Collapse" : "Expand"}
-            </button>
+              expanded={expanded}
+            />
           </div>
         </div>
-        <p className="nx-label truncate">
-          {openPrepCount > 0
-            ? `${openPrepCount} to do first`
-            : `Next ${RANGE_LABEL[days]}`}
+        <p className="truncate text-[13px] text-ink-ghost">
+          {tab === "reminders"
+            ? "Everything that needs doing"
+            : openPrepCount > 0
+              ? `${openPrepCount} to do first`
+              : rangeHeading(days)}
         </p>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+        <div
+          className="mt-1 flex flex-wrap items-center justify-between gap-2"
+          hidden={tab === "reminders"}
+        >
         {status.kind === "ready" && (
           <div
             role="group"
@@ -268,31 +471,57 @@ export default function CalendarSection({
                 onClick={() => setDays(option)}
                 aria-pressed={days === option}
                 data-active={days === option}
-                className="!px-3.5 !py-1.5 !text-[13px]"
+                className="!px-2.5 !py-1 !text-[13px]"
               >
                 {RANGE_SHORT[option]}
               </button>
             ))}
           </div>
         )}
-        {status.kind === "ready" && (
+        {/* Adding lives up here, not buried below the grid — the thing
+            you reach for most from a calendar shouldn't need a scroll. */}
+        {status.kind === "ready" && (googleConnected || appleConnected) && (
           <button
             type="button"
-            onClick={fetchEvents}
-            disabled={loadingEvents}
-            className="text-[13px] font-semibold text-ink transition-colors hover:text-accent-600 disabled:opacity-60"
+            onClick={openAddBlank}
+            className="nx-btn-primary nx-btn-sm !gap-1.5 !px-3 !py-1.5"
           >
-            {loadingEvents ? "Refreshing…" : "Refresh"}
+            <PanelIcon name="plus" size={14} />
+            New
           </button>
         )}
         </div>
       </header>
 
-      {!expanded ? (
-        <p className="mt-3 text-sm text-ink-ghost">
-          {events.length} event{events.length === 1 ? "" : "s"} in the next{" "}
-          {RANGE_LABEL[days]}.
-        </p>
+      {tab === "reminders" ? (
+        expanded ? (
+          <RemindersSection />
+        ) : (
+          <p className="mt-3 text-sm text-ink-ghost">
+            {openPrepCount === 0
+              ? "Nothing outstanding."
+              : `${openPrepCount} to do before your next events.`}
+          </p>
+        )
+      ) : !expanded ? (
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <p className="text-sm text-ink-ghost">
+            {events.length} event{events.length === 1 ? "" : "s"}{" "}
+            {days === 1 ? "today" : `in the next ${RANGE_LABEL[days]}`}.
+          </p>
+          {status.kind === "ready" && (googleConnected || appleConnected) && (
+            <button
+              type="button"
+              onClick={openAddBlank}
+              aria-label="Add event"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-600 text-white transition-colors hover:bg-accent-700"
+            >
+              <span aria-hidden className="text-[15px] leading-none">
+                +
+              </span>
+            </button>
+          )}
+        </div>
       ) : (
       <div className="nx-board-body mt-3">
         {status.kind === "loading" && (
@@ -336,6 +565,37 @@ export default function CalendarSection({
               </p>
             )}
 
+            {sources?.google === "auth_expired" && (
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Your Google connection expired, so none of your Google
+                events are showing.{" "}
+                <a
+                  href="/api/google/connect"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Reconnect Google
+                </a>{" "}
+                — nothing else needs redoing.
+              </p>
+            )}
+
+            {sources?.google === "ok" && !googleCanWrite && (
+              <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Google is showing your events but hasn&apos;t granted
+                permission to change them — the consent screen lists
+                reading and editing separately, and only reading was
+                ticked. Edit and Delete will fail until that&apos;s
+                granted.{" "}
+                <a
+                  href="/api/google/connect"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Reconnect and allow calendar changes
+                </a>
+                .
+              </p>
+            )}
+
             {sources?.apple === "auth_failed" && (
               <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Apple isn&apos;t accepting your app-specific password
@@ -363,56 +623,89 @@ export default function CalendarSection({
               <EventListSkeleton />
             ) : events.length === 0 && !eventsError ? (
               <p className="text-sm text-neutral-500">
-                Nothing scheduled in the next {RANGE_LABEL[days]}.
+                {days === 1
+                  ? "Nothing scheduled today."
+                  : `Nothing scheduled in the next ${RANGE_LABEL[days]}.`}
               </p>
+            ) : days === 1 || days === 7 ? (
+              <>
+                {/* Named once per calendar, not per event — this is what
+                    tells the reader "sky = Work, violet = Family" rather
+                    than making them guess from context. Only worth the
+                    space once there's more than one calendar to tell
+                    apart. */}
+                {calendarLegend.length > 1 && (
+                  <CalendarLegend legend={calendarLegend} />
+                )}
+                {/* Week: a real hour grid, the way a calendar app shows
+                    "this week" — time and duration as position, not
+                    text. */}
+                <WeekView
+                  dayCount={days}
+                  events={events}
+                  selectedKey={selectedKey}
+                  onSelect={toggleSelected}
+                  onAddSlot={
+                    googleConnected || appleConnected ? openAddAt : undefined
+                  }
+                  palette={calendarPalette}
+                />
+              </>
+            ) : days === 30 ? (
+              <>
+                {calendarLegend.length > 1 && (
+                  <CalendarLegend legend={calendarLegend} />
+                )}
+                {/* Month: a box per day. Thirty days as a scrolling list
+                    of headings stops being scannable well before day
+                    thirty. */}
+                <MonthView
+                  events={events}
+                  windowDays={days}
+                  selectedKey={selectedKey}
+                  onSelect={toggleSelected}
+                  onAddSlot={
+                    googleConnected || appleConnected
+                      ? (date) => openAddAt(date)
+                      : undefined
+                  }
+                  palette={calendarPalette}
+                />
+              </>
             ) : (
-              <div className="flex flex-col gap-4">
-                {dayGroups.map((group) => (
-                  <div key={group.day}>
-                    {/* Day headers carry the date so the rows don't have
-                        to repeat it — the canvas puts a mono label and a
-                        hairline across the top of each day. */}
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        className={
-                          "nx-label-lg shrink-0 " +
-                          (group.day === "Today" ? "text-accent-600" : "")
-                        }
-                      >
-                        {group.day}
-                      </span>
-                      <span className="h-px flex-1 bg-line-soft" />
-                    </div>
-
-                    <ul className="mt-2.5 flex flex-col gap-2">
-                      {group.events.map((event) => (
-                        <EventRow
-                          key={event.key}
-                          event={event}
-                          items={prep[event.key] ?? []}
-                          generated={generated.has(event.key)}
-                          onItemsChange={handleItemsChange}
-                          onGenerated={handleGenerated}
-                          onDeleted={handleDeleted}
-                          onUpdated={handleUpdated}
-                          // Naming the calendar only earns its space once
-                          // both services are in play — otherwise every
-                          // row says the same word.
-                          showCalendarName={googleConnected && appleConnected}
-                        />
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
+              // 3 months stays an agenda — a grid that wide would be
+              // mostly empty cells, and this is the range for scanning
+              // ahead rather than seeing a week or month at a glance.
+              // It's a dense one, though: full event rows (prep
+              // checklist, edit controls and all) turned ninety days
+              // into something you scrolled rather than scanned, so the
+              // rows here are one line each and open the same detail
+              // modal the grids do.
+              <>
+                {calendarLegend.length > 1 && (
+                  <CalendarLegend legend={calendarLegend} />
+                )}
+                <AgendaView
+                  events={events}
+                  selectedKey={selectedKey}
+                  onSelect={toggleSelected}
+                  palette={calendarPalette}
+                />
+              </>
             )}
 
-            {/* Either service can take a new event now, so this shows
-                whenever at least one is connected. The picker inside
-                decides what's actually writable — a calendar the user
-                can only read never reaches the dropdown. */}
-            {(googleConnected || appleConnected) && (
-              <AddEventForm onCreated={fetchEvents} />
+            {/* For the 3-month agenda, "add" is still a plain link at
+                the bottom of the list — there's no grid to hand a
+                clicked date to, so the header/preview button and this
+                link both just open the same blank modal. */}
+            {days === 90 && (googleConnected || appleConnected) && (
+              <button
+                type="button"
+                onClick={openAddBlank}
+                className="mt-3 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-700"
+              >
+                + Add an event
+              </button>
             )}
           </>
         )}
@@ -439,7 +732,7 @@ export default function CalendarSection({
             ) : (
               <a
                 href="/api/google/connect"
-                className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+                className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
               >
                 Connect Google
               </a>
@@ -460,7 +753,7 @@ export default function CalendarSection({
               <button
                 type="button"
                 onClick={() => setShowAppleForm(true)}
-                className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-neutral-800"
+                className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-neutral-800"
               >
                 Connect Apple
               </button>
@@ -477,7 +770,67 @@ export default function CalendarSection({
       )}
       </div>
       )}
+
+      {/* Add and "here's what's on this event" are mutually exclusive
+          (each closes the other on open — see toggleSelected/openAddAt),
+          so one modal slot covers both. Rendered fixed to the viewport,
+          so it shows up centered immediately regardless of where the
+          panel is scrolled to. */}
+      {addOpen && (googleConnected || appleConnected) && (
+        <CalendarModal title="Add an event" onClose={closeAdd}>
+          <AddEventForm
+            open={addOpen}
+            onOpenChange={(next) => {
+              if (!next) closeAdd();
+            }}
+            onCreated={fetchEvents}
+            initialDate={addPrefill?.date}
+            initialStartTime={addPrefill?.startTime}
+            initialEndTime={addPrefill?.endTime}
+            initialAllDay={addPrefill?.allDay}
+          />
+        </CalendarModal>
+      )}
+
+      {!addOpen && selectedEvent && (
+        <CalendarModal
+          title={selectedEvent.summary}
+          onClose={() => setSelectedKey(null)}
+        >
+          <ul className="flex flex-col gap-2">
+            <EventRow
+              key={selectedEvent.key}
+              event={selectedEvent}
+              items={prep[selectedEvent.key] ?? []}
+              generated={generated.has(selectedEvent.key)}
+              onItemsChange={handleItemsChange}
+              onGenerated={handleGenerated}
+              onDeleted={handleDeleted}
+              onUpdated={handleUpdated}
+              color={colorFor(selectedEvent, calendarPalette)}
+              showCalendarName={googleConnected && appleConnected}
+            />
+          </ul>
+        </CalendarModal>
+      )}
     </section>
+  );
+}
+
+function CalendarLegend({
+  legend,
+}: {
+  legend: { label: string; color: CalendarColor }[];
+}) {
+  return (
+    <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {legend.map(({ label, color }) => (
+        <span key={label} className="flex items-center gap-1.5 text-[12px] text-ink-muted">
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${color.dot}`} />
+          {label}
+        </span>
+      ))}
+    </div>
   );
 }
 

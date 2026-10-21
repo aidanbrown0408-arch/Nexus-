@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Logo from "../Logo";
 import {
   CORE_SECTION,
   OPTIONAL_SECTIONS,
@@ -205,7 +206,7 @@ export default function OnboardingFlow() {
         className="mb-8 h-1 w-full overflow-hidden rounded-full bg-surface-sunken"
       >
         <div
-          className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+          className="h-full rounded-full bg-indigo-600 transition-all duration-300"
           style={{ width: `${((step.index + 1) / total) * 100}%` }}
         />
       </div>
@@ -312,7 +313,7 @@ function QuestionScreen({
               if (e.key === "Enter") submit();
             }}
             placeholder={question.placeholder}
-            className="w-full rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full rounded-lg border border-neutral-300 px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -322,7 +323,7 @@ function QuestionScreen({
             type="time"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors focus:border-indigo-400"
+            className="rounded-lg border border-neutral-300 px-4 py-3 text-base text-neutral-900 outline-none transition-colors focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -333,7 +334,7 @@ function QuestionScreen({
             onChange={(e) => setText(e.target.value)}
             rows={question.kind === "list" ? 4 : 3}
             placeholder={question.placeholder}
-            className="w-full resize-none rounded-xl border border-line px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full resize-none rounded-lg border border-neutral-300 px-4 py-3 text-base leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -364,7 +365,7 @@ function QuestionScreen({
                 value={other}
                 onChange={(e) => setOther(e.target.value)}
                 placeholder="What field is it?"
-                className="w-full rounded-xl border border-line px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+                className="w-full rounded-lg border border-neutral-300 px-4 py-3 text-base text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
               />
             )}
           </div>
@@ -409,7 +410,7 @@ function QuestionScreen({
           type="button"
           onClick={submit}
           disabled={!canSubmit || busy}
-          className="rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {busy ? "Saving…" : "Continue"}
         </button>
@@ -508,7 +509,7 @@ function OfferScreen({
           onClick={() =>
             onPick(OPTIONAL_SECTIONS.filter((s) => picked.includes(s.id)))
           }
-          className="rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {picked.length ? "Continue" : "Finish"}
         </button>
@@ -531,8 +532,9 @@ function OfferScreen({
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-12">
-      <div className="w-full max-w-lg rounded-2xl border border-line bg-white p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-8 px-6 py-12">
+      <Logo />
+      <div className="w-full max-w-lg rounded-panel border border-line bg-white p-8 shadow-pop sm:p-10">
         {children}
       </div>
     </main>

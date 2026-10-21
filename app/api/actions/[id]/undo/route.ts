@@ -5,6 +5,7 @@ import {
   getAction,
   releaseUndo,
   readDraftId,
+  readItemId,
   readLabelId,
   readMessageIds,
 } from "@/lib/actions";
@@ -22,6 +23,7 @@ import {
   getAppleCredentials,
   type AppleEventSnapshot,
 } from "@/lib/apple";
+import { deletePrepItem } from "@/lib/prep";
 import { errorMessage } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -171,6 +173,20 @@ async function reverse(
         // deleting it would take it off anything else that carries it,
         // which is well beyond undoing this one action.
         await removeLabel(client, ids, labelId);
+        break;
+      }
+      case "delete_task": {
+        const itemId = readItemId(action.target);
+        if (!itemId) {
+          return NextResponse.json(
+            { error: "That action didn't record a reminder to remove." },
+            { status: 422 }
+          );
+        }
+        // No 404 special-case needed: the delete filters on the user id
+        // and simply matches nothing if the user already removed the row
+        // by hand, which is the state we were after anyway.
+        await deletePrepItem(userId, itemId);
         break;
       }
       case "remove_filter": {

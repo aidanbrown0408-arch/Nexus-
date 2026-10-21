@@ -31,6 +31,7 @@ const KIND_LABEL: Record<string, string> = {
   trash: "Trashed",
   event_create: "Event added",
   event_delete: "Event removed",
+  task_create: "Reminder added",
 };
 
 function timeOf(iso: string): string {
@@ -202,7 +203,7 @@ export default function ActivityList() {
         <button
           type="button"
           onClick={load}
-          className="mt-3 rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
+          className="mt-3 rounded-lg border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
         >
           Try again
         </button>
@@ -227,11 +228,11 @@ export default function ActivityList() {
           <h2 className="nx-label">
             {group.day}
           </h2>
-          <ul className="mt-2 divide-y divide-line-soft border-t border-line-soft">
+          <ul className="mt-2 divide-y divide-line-soft overflow-hidden rounded-xl border border-line bg-white shadow-raised">
             {group.actions.map((action) => {
               const undone = Boolean(action.undoneAt);
               return (
-                <li key={action.id} className="py-3">
+                <li key={action.id} className="px-4 py-3.5 transition-colors hover:bg-surface-soft/70">
                   <div className="flex items-baseline justify-between gap-4">
                     <div className="min-w-0">
                       <p
@@ -270,7 +271,7 @@ export default function ActivityList() {
                         type="button"
                         onClick={() => undo(action.id)}
                         disabled={undoing.has(action.id)}
-                        className="shrink-0 rounded-full border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
+                        className="shrink-0 rounded-lg border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
                       >
                         {undoing.has(action.id) ? "Undoing…" : "Undo"}
                       </button>

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import {
   getAuthorizedClientForUser,
+  googleErrorReason,
   hasScope,
   CALENDAR_EVENTS_SCOPE,
 } from "@/lib/google";
@@ -98,8 +99,21 @@ export async function DELETE(request: NextRequest, { params }: Context) {
       });
     } catch (err) {
       console.error("Apple event delete failed", errorMessage(err));
+      // The specific reasons iCloud refuses are ones the user can act
+      // on — a read-only shared calendar, an event already removed on
+      // another device. Flattening them all to "Couldn't delete that
+      // event" left the only visible symptom being a button that
+      // appeared to do nothing. The update branch below already passed
+      // these through; delete never did.
       return NextResponse.json(
-        { error: "Couldn't delete that event.", code: "delete_failed" },
+        {
+          error:
+            err instanceof Error &&
+            /read-only|no longer there|refused/i.test(err.message)
+              ? err.message
+              : "Couldn't delete that iCloud event.",
+          code: "delete_failed",
+        },
         { status: 503 }
       );
     }
@@ -134,10 +148,22 @@ export async function DELETE(request: NextRequest, { params }: Context) {
       );
     }
     if (!hasScope(client.credentials.scope, CALENDAR_EVENTS_SCOPE)) {
+      // This fired once against an account whose stored grant was
+      // complete, which meant the scope was being lost between the
+      // database and here rather than never granted. Saying what the
+      // check actually saw turns that from a guess into a fact — dev
+      // only, since it's noise in a real user's face.
+      console.error(
+        "Calendar write scope missing at delete. Client scope:",
+        client.credentials.scope ?? "(none)"
+      );
       return NextResponse.json(
         {
           error: "Nexus needs permission to change your calendar.",
           code: "scope_missing",
+          ...(process.env.NODE_ENV !== "production"
+            ? { debug: { clientScope: client.credentials.scope ?? null } }
+            : {}),
         },
         { status: 403 }
       );
@@ -185,6 +211,48 @@ export async function DELETE(request: NextRequest, { params }: Context) {
     });
   } catch (err) {
     console.error("Event delete failed", errorMessage(err));
+    const code =
+      typeof err === "object" && err && "code" in err
+        ? (err as { code: number }).code
+        : null;
+    if (code === 403) {
+      // The scope was already checked above, so a 403 reaching here is
+      // usually about *this event* rather than the connection: a guest
+      // trying to delete the organizer's meeting, or a calendar the
+      // account only subscribes to. Reporting those as "reconnect
+      // Google" sends the user round a loop that can't terminate,
+      // because the grant they're being asked to give is already given.
+      const { reason, detail, scopeRelated } = googleErrorReason(err);
+      console.error("Google refused the delete", { reason, detail });
+
+      if (scopeRelated) {
+        return NextResponse.json(
+          {
+            error: "Nexus needs permission to change your calendar.",
+            code: "scope_missing",
+          },
+          { status: 403 }
+        );
+      }
+
+      const message =
+        reason === "forbiddenForNonOrganizer"
+          ? "Google won't let this account delete that event — you're a guest on it, not the organizer. Decline it in Google Calendar instead."
+          : detail
+            ? `Google refused: ${detail}`
+            : "Google refused to delete that event, and didn't say why.";
+
+      return NextResponse.json(
+        { error: message, code: "forbidden", reason },
+        { status: 403 }
+      );
+    }
+    if (code === 404 || code === 410) {
+      return NextResponse.json(
+        { error: "That event is no longer there.", code: "not_found" },
+        { status: 404 }
+      );
+    }
     return NextResponse.json(
       { error: "Couldn't delete that event.", code: "delete_failed" },
       { status: 503 }
@@ -366,10 +434,30 @@ export async function PATCH(request: NextRequest, { params }: Context) {
         ? (err as { code: number }).code
         : null;
     if (code === 403) {
+      // Same reasoning as DELETE above — a 403 here is more often about
+      // this event than about the connection.
+      const { reason, detail, scopeRelated } = googleErrorReason(err);
+      console.error("Google refused the update", { reason, detail });
+
+      if (scopeRelated) {
+        return NextResponse.json(
+          {
+            error: "Nexus needs permission to change your calendar.",
+            code: "scope_missing",
+          },
+          { status: 403 }
+        );
+      }
       return NextResponse.json(
         {
-          error: "Nexus needs permission to change your calendar.",
-          code: "scope_missing",
+          error:
+            reason === "forbiddenForNonOrganizer"
+              ? "Google won't let this account change that event — you're a guest on it, not the organizer."
+              : detail
+                ? `Google refused: ${detail}`
+                : "Google refused to change that event, and didn't say why.",
+          code: "forbidden",
+          reason,
         },
         { status: 403 }
       );

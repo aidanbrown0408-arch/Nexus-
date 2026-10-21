@@ -165,7 +165,7 @@ export default function GuestPicker({
                 type="button"
                 onClick={() => remove(guest.email)}
                 aria-label={`Remove ${guest.name}`}
-                className="shrink-0 rounded-full px-1 text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-700"
+                className="shrink-0 rounded-lg px-1 text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-700"
               >
                 ×
               </button>

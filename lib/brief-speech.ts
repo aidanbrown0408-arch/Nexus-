@@ -1,16 +1,36 @@
 import type { Brief, NewsHighlight } from "./brief";
 import { speakableText } from "./speech-text";
 
-// The brief, read aloud.
+// The brief, said out loud.
 //
 // This is not the chat path. `speakableText` cleans up one message that
 // was written to be read; this assembles a whole brief — a structured
-// object, not prose — into something a person would say. The difference
-// that matters is coverage: the brief on screen has sections a user
-// specifically asked for in the interview (markets, the situation
-// paragraphs, headlines), and a spoken version that quietly stops after
-// the priorities is the same bug as a ticked box that renders nothing.
-// Everything on the card is spoken, in the order it appears there.
+// object, not prose — into something a person would say.
+//
+// Two rules, and they pull against each other.
+//
+// Coverage first: everything on the card is spoken. The brief has
+// sections the user specifically asked for in the interview (markets,
+// the situation paragraphs, headlines), and a spoken version that
+// quietly stops after the priorities is the same bug as a ticked box
+// that renders nothing. A section with no content says why it's empty
+// rather than vanishing.
+//
+// But not the card read aloud. An earlier version of this narrated the
+// screen in order — header, item, item, header — and it sounded like
+// one: every priority the same shape, every quote its own stubby
+// sentence, "Markets." arriving as a block. Spoken English doesn't
+// work like that. A person says "top of the list", then "after that",
+// then "and last"; they run two numbers into one breath with a
+// "while"; they close with "that's everything" so you know they're
+// done. So the structure here is deliberately not the card's: the same
+// facts, re-narrated.
+//
+// What is *not* rephrased is anything that could be wrong if it were.
+// Priority titles, the situation paragraphs, headline titles and every
+// market figure are passed through exactly as they arrived — the same
+// guarantee the card makes (see the comments on NewsHighlight and
+// `markets` in brief.ts). Only the connective tissue is ours to write.
 //
 // Pure, and in lib/, for the reason the test config gives: the parts of
 // the voice feature worth testing are the ones with no browser in them.
@@ -21,17 +41,30 @@ const SOURCE_PHRASE: Record<string, string> = {
   both: "from your email and your calendar",
 };
 
-// Up to five priorities come back from the model, so five ordinals is
-// the whole range. Past that the list is spoken without one rather than
-// inventing "sixthly".
-const ORDINALS = ["First", "Second", "Third", "Fourth", "Fifth"];
-
 const NEWS_CATEGORY_PHRASE: Record<NewsHighlight["category"], string> = {
   financial: "markets",
   industry: "industry",
   us: "U.S.",
   world: "world",
 };
+
+// A different-sounding brief every morning, without a model call and
+// without a coin flip. The variant is chosen from the brief's own text,
+// so two different mornings phrase things differently and the same
+// brief phrased twice is identical — which is what makes this testable
+// at all, and what stops a re-render from re-narrating mid-sentence.
+function seedFrom(brief: Brief): number {
+  const source = `${brief.greeting ?? ""}|${brief.headline ?? ""}`;
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function pick<T>(options: readonly T[], seed: number, salt: number): T {
+  return options[(seed + salt) % options.length];
+}
 
 // A sentence the ear can find the end of. Speech engines pause on a full
 // stop and run straight through a line break, so every fragment that is
@@ -42,9 +75,16 @@ function sentence(text: string): string {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+// The same, minus the stop — for a fragment about to be joined to
+// something else with a comma or a dash.
+function clause(text: string): string {
+  return speakableText(text).replace(/[.]+$/, "").trim();
+}
+
 // "$512.30" and "-1.2%" are written forms. Said out loud they want
 // words, and the sign wants to be a direction rather than a hyphen the
-// synthesiser may swallow.
+// synthesiser may swallow. The figures themselves are untouched: this
+// changes how a number is pronounced, never what it is.
 function spokenQuote(quote: {
   label: string;
   price: number;
@@ -53,102 +93,239 @@ function spokenQuote(quote: {
   const price =
     quote.price >= 1000
       ? Math.round(quote.price).toLocaleString("en-US")
-      : quote.price.toFixed(2);
+      : // A trailing ".00" is two syllables nobody says. The cents stay
+        // wherever there are any.
+        quote.price.toFixed(2).replace(/\.00$/, "");
 
-  const magnitude = Math.abs(quote.changePercent).toFixed(2);
+  // "down 1.20 percent" is written precision read as a stutter; "down
+  // 1.2 percent" is the same number said the way it's said.
+  const magnitude = String(parseFloat(Math.abs(quote.changePercent).toFixed(2)));
   const direction =
     quote.changePercent > 0 ? "up" : quote.changePercent < 0 ? "down" : "flat";
 
   const move =
-    direction === "flat"
-      ? "flat on the day"
-      : `${direction} ${magnitude} percent`;
+    direction === "flat" ? "flat on the day" : `${direction} ${magnitude} percent`;
 
-  return `${quote.label} is at ${price} dollars, ${move}.`;
+  return `${quote.label} is at ${price} dollars, ${move}`;
 }
+
+// Two numbers in one breath is how a person reads a row of them; six
+// stubby sentences is a screen reader. So quote clauses go out in pairs.
+function pairUp(clauses: string[], joiner: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < clauses.length; i += 2) {
+    out.push(`${clauses.slice(i, i + 2).join(joiner)}.`);
+  }
+  return out;
+}
+
+// Headlines are too long to pair — two of them in one sentence is a
+// clause nobody can hold. They get a connector each instead, which is
+// the difference between a list being recited and one being told.
+const NEWS_CONNECTORS = ["Also,", "Then,", "Elsewhere,", "Separately,"] as const;
+
+const OPENERS = ["Good morning.", "Morning.", "Right — good morning."] as const;
+
+// Ordinals are how a document numbers a list. These are how someone
+// talks through one.
+const FIRST_STEP = [
+  "Top of the list,",
+  "First thing,",
+  "Starting with the one that matters,",
+] as const;
+const MIDDLE_STEPS = ["After that,", "Then,", "Next,", "Also,"] as const;
+const LAST_STEP = ["And last,", "And finally,", "Last one,"] as const;
+
+const PRIORITY_LEAD_IN = [
+  "Here's what wants you today.",
+  "A few things need you.",
+  "This is what I'd look at first.",
+] as const;
+const SCHEDULE_LEAD_IN = ["As for the day itself,", "On your schedule,", "Day-wise,"] as const;
+const MARKETS_LEAD_IN = ["On the markets,", "Markets, briefly:", "Where the numbers are,"] as const;
+const SITUATION_LEAD_IN = [
+  "Stepping back for a moment.",
+  "The wider picture.",
+  "Here's the context around it.",
+] as const;
+const NEWS_LEAD_IN = ["In the headlines,", "On the news,", "Worth knowing,"] as const;
+const SIGN_OFF = ["That's everything.", "That's the lot.", "That's your morning."] as const;
 
 export function briefToSpeech(brief: Brief | null | undefined): string {
   if (!brief) return "";
 
+  const seed = seedFrom(brief);
   const parts: string[] = [];
 
-  const greeting = sentence(brief.greeting ?? "");
-  const headline = sentence(brief.headline ?? "");
-  if (greeting) parts.push(greeting);
-  if (headline) parts.push(headline);
+  const greeting = clause(brief.greeting ?? "");
+  const headline = clause(brief.headline ?? "");
 
-  // Said before the priorities rather than after, because it changes how
-  // to hear everything that follows.
+  if (greeting) {
+    // The card's greeting is a statement of the day's shape, not a
+    // hello — so one gets put in front of it, unless the model already
+    // wrote one and two would be odd.
+    const alreadyGreets = /\b(morning|hello|hi|good afternoon|good evening)\b/i.test(
+      greeting
+    );
+    if (!alreadyGreets) parts.push(pick(OPENERS, seed, 0));
+    // Greeting and headline are one thought said aloud — "Two things
+    // need you today: Sarah's waiting on the Q3 budget" — where on
+    // screen they're two lines because two lines look better.
+    parts.push(headline ? `${greeting}: ${headline}.` : `${greeting}.`);
+  } else if (headline) {
+    parts.push(pick(OPENERS, seed, 0), `${headline}.`);
+  }
+
+  // Said before the priorities rather than after, because a gap in the
+  // source data changes how to hear everything that follows.
   if (brief.calendarUnavailable) {
     parts.push(
-      "This is from your email only — your calendar wasn't available this morning."
+      "One caveat: this is from your email only — your calendar wasn't available this morning."
+    );
+  }
+  // The card shows this one too, and a spoken brief that silently drops
+  // it is a brief that sounds complete while being half the picture.
+  if (brief.mailUnavailable) {
+    parts.push(
+      "One caveat: this is from your calendar only — your mail wasn't available this morning."
     );
   }
 
-  const priorities = Array.isArray(brief.priorities) ? brief.priorities : [];
+  const priorities = (Array.isArray(brief.priorities) ? brief.priorities : []).filter(
+    (p) => clause(p?.title ?? "")
+  );
+
+  // Only where nothing has introduced them yet. After a greeting like
+  // "Three things need you today", a lead-in says it a second time.
+  if (priorities.length > 1 && !greeting && !headline) {
+    parts.push(pick(PRIORITY_LEAD_IN, seed, 1));
+  }
+
   priorities.forEach((priority, i) => {
-    const title = sentence(priority?.title ?? "");
-    if (!title) return;
-    const lead = ORDINALS[i] ? `${ORDINALS[i]}, ` : "";
-    // The source is a small grey label on screen. Spoken, it needs to be
-    // part of a sentence or it lands as a stray word — folded into the
-    // title where the title is a statement, and left as its own short
-    // sentence where it isn't, so a question keeps its question mark.
-    const where = SOURCE_PHRASE[priority?.source] ?? "";
-    if (!where) {
-      parts.push(`${lead}${title}`);
-    } else if (/[?!]$/.test(title)) {
-      parts.push(`${lead}${title}`, `That's ${where}.`);
+    const title = clause(priority.title);
+    const last = i === priorities.length - 1;
+    // A single priority doesn't get counted off — "top of the list" for
+    // a list of one is a tell that a template wrote it.
+    const lead =
+      priorities.length === 1
+        ? ""
+        : i === 0
+          ? `${pick(FIRST_STEP, seed, 2)} `
+          : last
+            ? `${pick(LAST_STEP, seed, 3)} `
+            : `${pick(MIDDLE_STEPS, seed, i)} `;
+
+    // The source is a small grey label on screen. Spoken, it has to be
+    // part of a sentence or it lands as a stray word — hung off the
+    // title with a dash where the title is a statement, and left as its
+    // own short remark where it isn't, so a question keeps its mark.
+    const where = SOURCE_PHRASE[priority.source] ?? "";
+    const isQuestion = /[?!]$/.test(speakableText(priority.title).trim());
+
+    if (isQuestion) {
+      const asked = speakableText(priority.title).trim();
+      parts.push(`${lead}${asked}`);
+      if (where) parts.push(`That's ${where}.`);
+    } else if (where) {
+      parts.push(`${lead}${title} — ${where}.`);
     } else {
-      parts.push(`${lead}${title.replace(/\.$/, "")}, ${where}.`);
+      parts.push(`${lead}${title}.`);
     }
-    const reason = sentence(priority?.reason ?? "");
+
+    const reason = sentence(priority.reason ?? "");
     if (reason) parts.push(reason);
   });
 
-  const scheduleNote = sentence(brief.scheduleNote ?? "");
-  if (scheduleNote) parts.push(scheduleNote);
+  const scheduleNote = clause(brief.scheduleNote ?? "");
+  if (scheduleNote) {
+    // Lower-case the first letter only where it's safe to: a note that
+    // starts with a name or an initialism keeps it.
+    const runsOn = /^[A-Z][a-z]/.test(scheduleNote)
+      ? scheduleNote[0].toLowerCase() + scheduleNote.slice(1)
+      : scheduleNote;
+    parts.push(`${pick(SCHEDULE_LEAD_IN, seed, 4)} ${runsOn}.`);
+  }
 
   // Everything below here exists only because the user asked for it in
   // the interview. A section they ticked and can't hear reads as a
   // setting that didn't save, so each one either speaks its content or
   // says plainly why it has none.
   const quotes = brief.markets?.quotes ?? [];
-  if (quotes.length) {
-    parts.push("Markets.");
-    for (const quote of quotes) parts.push(spokenQuote(quote));
-  } else if (brief.marketsUnavailable === "not_configured") {
+  // The situation opens with a paragraph on markets, written from these
+  // exact figures — so on screen the row of tiles and that paragraph sit
+  // next to each other and the eye takes both in at a glance. In the ear
+  // they arrive one after the other, and the second one is the first one
+  // again: the quote row said what moved, then the paragraph says what
+  // moved and what it means. So where there's a written read, it does
+  // the talking and the tiles stay on screen where they belong.
+  const situationCoversMarkets = Boolean(brief.situation?.trim());
+  if (quotes.length && !situationCoversMarkets) {
+    const clauses = quotes.map(spokenQuote);
+    // The section announces itself inside the first number rather than
+    // ahead of it, so there's no header to hear.
+    const [first, ...rest] = pairUp(clauses, ", while ");
+    parts.push(`${pick(MARKETS_LEAD_IN, seed, 5)} ${first}`);
+    parts.push(...rest);
+  } else if (!quotes.length && brief.marketsUnavailable === "not_configured") {
     parts.push("Market prices aren't set up yet, so there are no numbers today.");
-  } else if (brief.marketsUnavailable === "fetch_failed") {
+  } else if (!quotes.length && brief.marketsUnavailable === "fetch_failed") {
     parts.push("Market prices couldn't be reached this morning.");
   }
 
   if (brief.situation) {
-    parts.push("Here's what's going on.");
-    for (const paragraph of brief.situation
+    const paragraphs = brief.situation
       .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter(Boolean)) {
-      const spoken = sentence(paragraph);
-      if (spoken) parts.push(spoken);
+      .map((p) => sentence(p.trim()))
+      .filter(Boolean);
+    if (paragraphs.length) {
+      parts.push(pick(SITUATION_LEAD_IN, seed, 6));
+      parts.push(...paragraphs);
     }
   }
 
-  const highlights = brief.newsHighlights ?? [];
+  const highlights = (brief.newsHighlights ?? []).filter((item) =>
+    clause(item?.title ?? "")
+  );
   if (highlights.length) {
-    parts.push("Headlines.");
-    for (const item of highlights) {
-      const title = sentence(item?.title ?? "").replace(/\.$/, "");
-      if (!title) continue;
-      const category = NEWS_CATEGORY_PHRASE[item?.category];
-      // The link is on screen and useless in the ear; the source is what
-      // tells you how much weight to give the headline.
-      const attribution = [category, item?.source].filter(Boolean).join(", ");
-      parts.push(attribution ? `${title}. ${attribution}.` : `${title}.`);
-    }
+    // The link is on screen and useless in the ear; the source is what
+    // tells you how much weight to give the headline. Spoken as a
+    // clause hanging off the headline rather than as its own stub
+    // sentence — "Fed holds rates steady. markets, Reuters." is two
+    // blocks where one sentence was meant. Titles are copied exactly,
+    // capital letters mid-sentence and all: a synthesiser doesn't
+    // pronounce case, and lowercasing mangles names and tickers.
+    const clauses = highlights.map((item) => {
+      const title = clause(item.title);
+      const category = NEWS_CATEGORY_PHRASE[item.category];
+      const attribution = item.source
+        ? `${item.source}${category ? ` on ${category}` : ""}`
+        : category
+          ? `on ${category}`
+          : "";
+      return attribution ? `${title}, from ${attribution}` : title;
+    });
+    clauses.forEach((line, i) => {
+      if (i === 0) {
+        parts.push(`${pick(NEWS_LEAD_IN, seed, 7)} ${line}.`);
+      } else {
+        parts.push(`${pick(NEWS_CONNECTORS, seed, i)} ${line}.`);
+      }
+    });
   } else if (brief.newsUnavailable === "fetch_failed") {
     parts.push("The news feeds couldn't be reached this morning.");
   }
 
-  return parts.join(" ").replace(/\s+/g, " ").trim();
+  // Nothing to say is said by saying nothing — an opener and a sign-off
+  // wrapped around silence is worse than silence.
+  if (!parts.length) return "";
+  parts.push(pick(SIGN_OFF, seed, 8));
+
+  return parts
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:?!])/g, "$1")
+    // "on U.S.." — an abbreviation already ending in a stop doesn't need
+    // the sentence's one on top of it.
+    .replace(/\.\.+/g, ".")
+    .trim();
 }

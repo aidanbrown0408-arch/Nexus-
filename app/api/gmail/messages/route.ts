@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getAuthorizedClientForUser } from "@/lib/google";
+import {
+  getAuthorizedClientForUser,
+  googleFailureResponse,
+} from "@/lib/google";
 import { fetchRecentMessages } from "@/lib/gmail";
 
 export const runtime = "nodejs";
@@ -28,13 +31,14 @@ export async function GET() {
     return NextResponse.json({ messages });
   } catch (err: unknown) {
     console.error("Gmail messages fetch failed", err);
-    const status =
-      typeof err === "object" && err && "code" in err && (err as { code: number }).code === 401
-        ? 401
-        : 500;
-    return NextResponse.json(
-      { error: "Failed to fetch messages from Gmail" },
-      { status }
+    // An expired grant comes back as `reauth_required` so the card can
+    // offer the one thing that fixes it. Before this, a revoked refresh
+    // token read as a plain server error and the only cure — reconnect —
+    // was the one thing the UI never suggested.
+    const { body, status } = googleFailureResponse(
+      err,
+      "Failed to fetch messages from Gmail"
     );
+    return NextResponse.json(body, { status });
   }
 }

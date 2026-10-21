@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { EventSummary } from "@/lib/events";
+import type { CalendarColor } from "./calendarColors";
 import type { PrepItem } from "@/lib/prep";
 
 // One event, plus the short list of things that have to happen before
@@ -22,6 +23,11 @@ type Props = {
   onItemsChange: (eventKey: string, items: PrepItem[]) => void;
   onGenerated: (eventKey: string) => void;
   showCalendarName: boolean;
+  // This calendar's color in the week/month grids, when the caller has
+  // one to hand over — falls back to the old two-tone Google/Apple
+  // stripe when it doesn't (e.g. nowhere else in the app builds a
+  // palette).
+  color?: CalendarColor;
   // `seriesId` is passed when a whole repeating series went, so the
   // parent can clear every occurrence rather than one row.
   onDeleted: (eventKey: string, seriesId?: string) => void;
@@ -87,6 +93,7 @@ export default function EventRow({
   showCalendarName,
   onDeleted,
   onUpdated,
+  color,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [drafting, setDrafting] = useState(false);
@@ -98,6 +105,19 @@ export default function EventRow({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [notifyGuests, setNotifyGuests] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Delete and edit failures need their own slot. `error` above is
+  // rendered inside the prep panel, which is collapsed unless the user
+  // opened it — so a failed delete set an error message into a part of
+  // the DOM nobody could see. The row just sat there, unchanged and
+  // unexplained, which reads exactly like a dead button.
+  const [actionError, setActionError] = useState<{
+    message: string;
+    code: string | null;
+    // Whatever the route wanted to say that isn't for a normal user —
+    // populated in development only. Shown here rather than logged so
+    // diagnosing a refusal doesn't mean opening devtools.
+    debug: string | null;
+  } | null>(null);
   // For a repeating event, whether to take the whole series. Defaults to
   // just this one: it's the smaller act, and the one someone clicking
   // Delete on a single row most often means.
@@ -122,8 +142,17 @@ export default function EventRow({
   // URL, since that's what a delete or an update is addressed to.
   const writable =
     event.source === "google"
-      ? Boolean(event.calendarId)
+      ? Boolean(event.calendarId) && event.canWrite !== false
       : Boolean(event.calendarId && event.objectUrl);
+
+  // Offered on a calendar this account only reads, Edit and Delete are
+  // buttons that cannot succeed — Google answers with a bare 403. Say
+  // why they're absent rather than leaving a silent gap where the
+  // controls are on every other row.
+  const readOnlyCalendar =
+    event.source === "google" &&
+    Boolean(event.calendarId) &&
+    event.canWrite === false;
 
   const done = items.filter((item) => item.done).length;
   const allReady = items.length > 0 && done === items.length;
@@ -287,7 +316,7 @@ export default function EventRow({
 
   async function remove() {
     setDeleting(true);
-    setError(null);
+    setActionError(null);
 
     try {
       const params = new URLSearchParams({
@@ -307,7 +336,17 @@ export default function EventRow({
         { method: "DELETE" }
       );
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error ?? "Couldn't delete that event");
+      if (!res.ok) {
+        setActionError({
+          message: body?.error ?? "Couldn't delete that event",
+          code: typeof body?.code === "string" ? body.code : null,
+          debug: body?.debug ? JSON.stringify(body.debug) : null,
+        });
+        setDeleting(false);
+        // The confirm box stays open on failure. Closing it threw away
+        // the one bit of context that makes the message make sense.
+        return;
+      }
 
       // Removed from the list only once the server confirms. An
       // optimistic disappearance here would be a meeting the user thinks
@@ -322,11 +361,13 @@ export default function EventRow({
         onDeleted(event.key);
       }
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Couldn't delete that event"
-      );
+      setActionError({
+        message:
+          err instanceof Error ? err.message : "Couldn't delete that event",
+        code: null,
+        debug: null,
+      });
       setDeleting(false);
-      setConfirmingDelete(false);
     }
   }
 
@@ -337,7 +378,7 @@ export default function EventRow({
       <span
         aria-hidden
         className={`w-[3px] shrink-0 rounded-full ${
-          event.source === "apple" ? "bg-amber-700/70" : "bg-accent-600"
+          color ? color.dot : event.source === "apple" ? "bg-amber-700/70" : "bg-accent-600"
         }`}
       />
       <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -387,7 +428,7 @@ export default function EventRow({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className={`rounded-full px-2.5 py-[3px] text-[11px] font-medium transition-colors ${
+              className={`rounded-lg px-2.5 py-[3px] text-[11px] font-medium transition-colors ${
                 allReady
                   ? "bg-emerald-100/70 text-emerald-800 hover:bg-emerald-100"
                   : items.length
@@ -425,6 +466,17 @@ export default function EventRow({
               >
                 Delete
               </button>
+            )}
+
+            {readOnlyCalendar && (
+              <span
+                className="text-[11px] text-ink-wisp"
+                title={`"${
+                  event.calendarName ?? "That calendar"
+                }" is shared with you at read-only access, so Google won't accept changes to it from here. Change it wherever it's owned.`}
+              >
+                Read-only calendar
+              </span>
             )}
           </div>
 
@@ -509,7 +561,7 @@ export default function EventRow({
                 <button
                   type="submit"
                   disabled={saving || !editSummary.trim()}
-                  className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving…" : "Save"}
                 </button>
@@ -517,7 +569,7 @@ export default function EventRow({
                   type="button"
                   onClick={() => setEditing(false)}
                   disabled={saving}
-                  className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
+                  className="rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
                 >
                   Cancel
                 </button>
@@ -597,7 +649,7 @@ export default function EventRow({
                   type="button"
                   onClick={remove}
                   disabled={deleting}
-                  className="rounded-full bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                  className="rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-60"
                 >
                   {deleting
                     ? "Deleting…"
@@ -610,9 +662,10 @@ export default function EventRow({
                   onClick={() => {
                     setConfirmingDelete(false);
                     setNotifyGuests(false);
+                    setActionError(null);
                   }}
                   disabled={deleting}
-                  className="rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
+                  className="rounded-lg border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
                 >
                   Keep it
                 </button>
@@ -621,6 +674,31 @@ export default function EventRow({
                 </span>
               </div>
             </div>
+          )}
+
+          {/* Outside the prep panel on purpose — see actionError above. */}
+          {actionError && (
+            <p className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800">
+              {actionError.message}
+              {actionError.debug && (
+                <span className="mt-1 block break-all font-mono text-[10px] opacity-70">
+                  {actionError.debug}
+                </span>
+              )}
+              {actionError.code === "scope_missing" && (
+                <>
+                  {" "}
+                  <a
+                    href="/api/google/connect"
+                    className="font-semibold underline underline-offset-2"
+                  >
+                    Reconnect Google
+                  </a>{" "}
+                  — reading your calendar and changing it are separate
+                  permissions, and this account only granted the first.
+                </>
+              )}
+            </p>
           )}
 
           {expanded && (

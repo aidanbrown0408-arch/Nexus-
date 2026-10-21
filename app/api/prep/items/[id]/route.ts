@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: { id: string } };
 
-// Tick an item off, or rename it. Both write paths in lib/prep filter on
+// Tick an item off, rename it, or move its due date. Both write paths
+// in lib/prep filter on
 // the Clerk user id as well as the row id — an id guessed from another
 // account matches nothing rather than updating it.
 export async function PATCH(request: NextRequest, { params }: Context) {
@@ -18,12 +19,32 @@ export async function PATCH(request: NextRequest, { params }: Context) {
   }
 
   try {
-    const body = (await request.json()) as { done?: unknown; title?: unknown };
+    const body = (await request.json()) as {
+      done?: unknown;
+      title?: unknown;
+      dueAt?: unknown;
+    };
 
-    const patch: { done?: boolean; title?: string } = {};
+    const patch: { done?: boolean; title?: string; dueAt?: string | null } = {};
     if (typeof body.done === "boolean") patch.done = body.done;
     if (typeof body.title === "string" && body.title.trim()) {
       patch.title = body.title.trim();
+    }
+
+    // Explicit null clears the date — moving something back to "No date"
+    // is a real edit, not a no-op, so it can't be conflated with the key
+    // simply being absent from the body.
+    if (body.dueAt === null) {
+      patch.dueAt = null;
+    } else if (typeof body.dueAt === "string") {
+      const due = new Date(body.dueAt);
+      if (Number.isNaN(due.getTime())) {
+        return NextResponse.json(
+          { error: "That date didn't parse" },
+          { status: 400 }
+        );
+      }
+      patch.dueAt = due.toISOString();
     }
 
     if (!Object.keys(patch).length) {

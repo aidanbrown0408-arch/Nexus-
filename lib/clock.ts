@@ -125,6 +125,86 @@ export function weekdayIn(timeZone: string, now: Date = new Date()): number {
 }
 
 /**
+ * How far a zone is from UTC at a given instant, in milliseconds.
+ *
+ * There is no API that hands this over, so it's derived: format the
+ * instant into the zone, read the wall-clock fields back as if they were
+ * UTC, and the difference is the offset. Doing it per-instant rather
+ * than per-zone is what makes it correct across a DST boundary — the
+ * same zone is -05:00 in January and -04:00 in July.
+ */
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  const asIfUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    // Some ICU builds render midnight as 24 under hour12:false.
+    get("hour") % 24,
+    get("minute"),
+    get("second")
+  );
+  return asIfUtc - date.getTime();
+}
+
+/**
+ * The instant at which a given calendar day began in a given zone.
+ *
+ * `day` is a YYYY-MM-DD key, the kind dayKey() produces. The naive read
+ * of it is UTC midnight; subtracting the zone's offset at roughly that
+ * moment moves it to the right instant. The second pass matters on the
+ * two days a year the offset changes between the estimate and the
+ * answer — without it, a spring-forward morning lands an hour out.
+ */
+export function zonedDayStart(day: string, timeZone: string): Date {
+  const naive = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(naive)) return new Date(NaN);
+
+  let instant = naive - zoneOffsetMs(new Date(naive), timeZone);
+  instant = naive - zoneOffsetMs(new Date(instant), timeZone);
+  return new Date(instant);
+}
+
+/**
+ * Midnight today, and midnight `days` calendar days later, both in the
+ * user's zone, as absolute instants.
+ *
+ * Stepping the day *key* forward rather than adding 24-hour blocks is
+ * deliberate: across a DST change a "day" is 23 or 25 hours long, and
+ * adding milliseconds would drift the far edge of the window off
+ * midnight.
+ */
+export function zonedWindow(
+  days: number,
+  timeZone: string,
+  now: Date = new Date()
+): { start: Date; end: Date } {
+  const startKey = dayKey(now, timeZone);
+  const start = zonedDayStart(startKey, timeZone);
+
+  // Walk the key forward by calendar days using a UTC cursor, which has
+  // no DST of its own to confuse the arithmetic.
+  const cursor = new Date(`${startKey}T00:00:00Z`);
+  cursor.setUTCDate(cursor.getUTCDate() + days);
+  const endKey = cursor.toISOString().slice(0, 10);
+
+  return { start, end: zonedDayStart(endKey, timeZone) };
+}
+
+/**
  * The wall-clock hour, minute and calendar day in a given zone.
  *
  * One formatter call for all three, because anything that reasons about

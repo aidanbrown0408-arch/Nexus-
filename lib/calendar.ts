@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import type { EventSummary, RawEvent } from "./events";
+import { calendarWindow } from "./calendar-window";
 
 // EventSummary lives in ./events now that Apple Calendar produces it too.
 // Re-exported here so existing imports from "@/lib/calendar" keep working.
@@ -18,18 +19,21 @@ const MAX_EVENTS = GOOGLE_MAX_EVENTS;
 // A 200-person all-hands doesn't need every address carried around.
 const MAX_ATTENDEES = 20;
 
-// Fetch events from now through `days` ahead across all of the user's
+// Fetch events from the start of today through `days` ahead across all of
+// the user's
 // visible calendars, in start order. Assumes the caller has already
 // confirmed the token carries the Calendar scope — the scope check stays
 // with the route so it can answer with its own code. Throws whatever the
 // Calendar API throws when the calendar list itself can't be read.
 export async function fetchUpcomingEvents(
   client: OAuth2Client,
-  days: number
+  days: number,
+  timeZone?: string | null
 ): Promise<RawEvent[]> {
-  const now = new Date();
-  const timeMax = new Date(now);
-  timeMax.setDate(timeMax.getDate() + days);
+  // From midnight in the *user's* zone, not from now and not from the
+  // host's midnight — see lib/calendar-window.ts. An event that already
+  // happened today is still part of today.
+  const { start: timeMin, end: timeMax } = calendarWindow(days, timeZone);
 
   const calendar = google.calendar({ version: "v3", auth: client });
 
@@ -47,12 +51,22 @@ export async function fetchUpcomingEvents(
   const calendarNames = new Map(
     visible.map((c) => [c.id as string, c.summaryOverride ?? c.summary ?? null])
   );
+  // Whether the account can write to each calendar, not just read it.
+  // Same test listWritableCalendars uses to build the "put it on which
+  // calendar?" dropdown — the two should never disagree about what's
+  // writable.
+  const calendarWritable = new Map(
+    visible.map((c) => [
+      c.id as string,
+      c.accessRole === "owner" || c.accessRole === "writer",
+    ])
+  );
 
   const results = await Promise.allSettled(
     calendarIds.map((calendarId) =>
       calendar.events.list({
         calendarId,
-        timeMin: now.toISOString(),
+        timeMin: timeMin.toISOString(),
         timeMax: timeMax.toISOString(),
         // Expand recurring events into individual instances; orderBy
         // requires it.
@@ -113,6 +127,7 @@ export async function fetchUpcomingEvents(
         source: "google" as const,
         calendarName: calendarNames.get(calendarId) ?? null,
         calendarId,
+        canWrite: calendarWritable.get(calendarId) ?? false,
         // Google events are addressed by id + calendarId; there's no
         // separate object URL the way CalDAV needs.
         objectUrl: null,

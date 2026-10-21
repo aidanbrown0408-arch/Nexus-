@@ -204,7 +204,7 @@ export default function FiltersSection() {
   }
 
   return (
-    <section className="mt-8 w-full max-w-3xl rounded-panel border border-line bg-white p-6">
+    <section className="mt-8 w-full max-w-3xl rounded-panel border border-line bg-white p-6 shadow-raised">
       <header>
         <h2 className="text-base font-semibold tracking-tight text-ink">Filters</h2>
         <p className="text-sm text-neutral-500">
@@ -278,7 +278,7 @@ export default function FiltersSection() {
               type="button"
               onClick={preview}
               disabled={stage.kind === "previewing" || !description.trim()}
-              className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {stage.kind === "previewing" ? "Checking…" : "See what it catches"}
             </button>
@@ -349,7 +349,7 @@ export default function FiltersSection() {
             <button
               type="button"
               onClick={() => create(stage.criteria, stage.label)}
-              className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+              className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
             >
               Turn it on
             </button>
@@ -359,7 +359,7 @@ export default function FiltersSection() {
                 setStage({ kind: "idle" });
                 setSweepExisting(false);
               }}
-              className="rounded-full border border-line bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
+              className="rounded-lg border border-line bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
             >
               Cancel
             </button>

@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { ActionKind, UndoKind } from "./actions";
 
 // Server-only Supabase client. Uses the service role key so we can write
 // user token rows without needing per-user Supabase auth — Clerk is the
@@ -47,24 +48,37 @@ export type AppleCredentialRow = {
   updated_at?: string;
 };
 
-// One checklist item hanging off a calendar event. `event_key` is the
-// stable per-occurrence key from lib/events.ts, not a calendar's own id —
-// see eventKey() there for why. The event title and start are snapshots
-// taken when the item was created, so a checklist still reads sensibly
-// (and can be swept up) after the event drops out of the fetch window.
+// One thing to do. Usually it hangs off a calendar event, in which case
+// `event_key` is the stable per-occurrence key from lib/events.ts, not a
+// calendar's own id — see eventKey() there for why. The event title and
+// start are snapshots taken when the item was created, so a checklist
+// still reads sensibly (and can be swept up) after the event drops out of
+// the fetch window.
+//
+// `event_key` is null for a reminder that belongs to no meeting. Those
+// carry their own `due_at`; an event-linked item leaves it null and is
+// due when its event is. Every read sorts on `due_at ?? event_start`.
 export type PrepItemRow = {
   id: string;
   user_id: string;
-  event_key: string;
+  event_key: string | null;
   event_summary: string | null;
   event_start: string | null;
   title: string;
   done: boolean;
   origin: "claude" | "user";
+  due_at: string | null;
+  source: PrepSource;
+  source_ref: Record<string, string> | null;
   position: number;
   created_at?: string;
   updated_at?: string;
 };
+
+// Where an item came from. Not cosmetic: it's what lets a row whose title
+// is only a subject line say who it came from, and what tells an undo
+// which rows Nexus created rather than the user.
+export type PrepSource = "event" | "manual" | "chat" | "email";
 
 // Records that we've already asked Claude to draft a checklist for an
 // event. Without it, an event whose suggestions the user deleted would
@@ -123,28 +137,18 @@ export type UserFactRow = {
   created_at?: string;
 };
 
+// The kind/undo unions live in lib/actions.ts, which is where every
+// writer and every undo handler already reads them from. They were
+// duplicated here and had drifted — this copy was missing task_create,
+// event_update and delete_task, so a `switch` over row.kind could
+// typecheck while silently not handling three real kinds.
 export type ActionLogRow = {
   id: string;
   user_id: string;
-  kind:
-    | "draft_reply"
-    | "archive"
-    | "label"
-    | "filter"
-    | "trash"
-    | "event_create"
-    | "event_delete";
+  kind: ActionKind;
   summary: string;
   target: Record<string, string> | null;
-  undo:
-    | "delete_draft"
-    | "unarchive"
-    | "remove_label"
-    | "remove_filter"
-    | "untrash"
-    | "delete_event"
-    | "restore_event"
-    | "none";
+  undo: UndoKind;
   undone_at: string | null;
   created_at?: string;
 };

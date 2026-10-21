@@ -4,6 +4,7 @@ import { getSupabaseAdmin, type AppleCredentialRow } from "./supabase";
 import { decryptSecret, encryptSecret } from "./crypto";
 import { toICalRRule, type Recurrence } from "./recurrence";
 import type { RawEvent } from "./events";
+import { calendarWindow } from "./calendar-window";
 
 // Apple Calendar, via CalDAV.
 //
@@ -555,16 +556,17 @@ export async function snapshotAppleEvent(
   };
 }
 
-// Fetch events from now through `days` ahead across every iCloud
+// Fetch events from the start of today through `days` ahead across every iCloud
 // calendar. Mirrors fetchUpcomingEvents on the Google side: same window,
 // same output, one unreadable calendar doesn't sink the rest.
 export async function fetchAppleEvents(
   credentials: AppleCredentials,
-  days: number
+  days: number,
+  timeZone?: string | null
 ): Promise<RawEvent[]> {
-  const windowStart = new Date();
-  const windowEnd = new Date(windowStart);
-  windowEnd.setDate(windowEnd.getDate() + days);
+  // Midnight in the user's own zone rather than now, matching the
+  // Google side — see lib/calendar-window.ts.
+  const { start: windowStart, end: windowEnd } = calendarWindow(days, timeZone);
 
   const client = await connect(credentials);
   const calendars = eventCalendars(await client.fetchCalendars());
@@ -802,6 +804,11 @@ function toEventSummary(
     // back up (via findCalendar) before an update or a pre-delete
     // snapshot.
     calendarId: calendarUrl,
+    // CalDAV doesn't advertise this reliably (see the note on
+    // listWritableAppleCalendars), so the Apple side keeps its existing
+    // test: an event addressable by object URL is offered as writable,
+    // and iCloud refusing is handled as an error with its own message.
+    canWrite: true,
     // The event's own .ics resource. Every occurrence of a recurring
     // series shares the same object URL, since they all live in one
     // file — which is also why there's no per-occurrence write here.

@@ -118,7 +118,7 @@ export default function DraftReply({
             href={draft.url}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
+            className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700"
           >
             Open in Gmail
           </a>
@@ -126,7 +126,7 @@ export default function DraftReply({
             type="button"
             onClick={() => discard(actionId)}
             disabled={discarding}
-            className="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
+            className="rounded-lg border border-line bg-white px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:opacity-60"
           >
             {discarding ? "Discarding…" : "Discard"}
           </button>
@@ -170,7 +170,7 @@ export default function DraftReply({
           type="button"
           onClick={generate}
           disabled={state.kind === "drafting"}
-          className="rounded-full border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg border border-line px-3 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state.kind === "drafting" ? "Drafting…" : "Draft reply"}
         </button>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { SECTIONS, type Question } from "@/lib/onboarding-questions";
+import VoicePicker from "./VoicePicker";
 
 // The onboarding interview, re-rendered as one editable page instead of a
 // wizard. Same question definitions, same API route — this is meant to be
@@ -129,7 +130,7 @@ export default function ProfileSettingsForm() {
       </div>
 
       {state === "loading" ? (
-        <div className="rounded-panel border border-line bg-white p-6">
+        <div className="rounded-panel border border-line bg-white p-6 shadow-raised">
           <div className="h-4 w-2/5 animate-pulse rounded bg-surface-sunken" />
           <div className="mt-4 space-y-3">
             <div className="h-10 w-full animate-pulse rounded-xl bg-surface-sunken" />
@@ -157,7 +158,7 @@ export default function ProfileSettingsForm() {
             />
           ))}
 
-          <section className="mb-6 rounded-panel border border-line bg-white p-6">
+          <section className="mb-6 rounded-panel border border-line bg-white p-6 shadow-raised">
             <h2 className="text-[15px] font-semibold tracking-tight text-ink">Voice</h2>
             <p className="mt-0.5 text-sm text-neutral-500">
               How Nexus sounds when you talk to it in chat.
@@ -175,12 +176,13 @@ export default function ProfileSettingsForm() {
                   Read replies aloud
                 </span>
                 <span className="mt-0.5 block text-xs text-neutral-500">
-                  Chat answers are spoken by your browser. The mic button for
-                  asking by voice is always there — this only controls whether
-                  Nexus talks back.
+                  The mic button for asking by voice is always there — this
+                  only controls whether Nexus talks back.
                 </span>
               </span>
             </label>
+
+            <VoicePicker />
           </section>
 
           <div className="mt-6 flex items-center gap-3">
@@ -188,7 +190,7 @@ export default function ProfileSettingsForm() {
               type="button"
               onClick={save}
               disabled={state === "saving"}
-              className="rounded-full bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {state === "saving" ? "Saving…" : "Save changes"}
             </button>
@@ -219,7 +221,7 @@ function SectionCard({
   setField: (field: string, value: string | string[]) => void;
 }) {
   return (
-    <section className="mb-6 rounded-panel border border-line bg-white p-6">
+    <section className="mb-6 rounded-panel border border-line bg-white p-6 shadow-raised">
       <h2 className="text-[15px] font-semibold tracking-tight text-ink">{title}</h2>
       {description && (
         <p className="mt-0.5 text-sm text-neutral-500">{description}</p>
@@ -285,7 +287,7 @@ function FieldEditor({
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.target.value)}
             placeholder={question.placeholder}
-            className="w-full rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -294,7 +296,7 @@ function FieldEditor({
             type="time"
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.target.value)}
-            className="rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-indigo-400"
+            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -313,7 +315,7 @@ function FieldEditor({
             }
             rows={question.kind === "list" ? 3 : 3}
             placeholder={question.placeholder}
-            className="w-full resize-none rounded-xl border border-line px-3 py-2 text-sm leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+            className="w-full resize-none rounded-lg border border-neutral-300 px-3 py-2 text-sm leading-relaxed text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
           />
         )}
 
@@ -326,7 +328,7 @@ function FieldEditor({
                   key={option.value}
                   type="button"
                   onClick={() => onChange(selected ? "" : option.value)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
                       : "border-line text-neutral-600 hover:bg-surface-soft"
@@ -346,7 +348,7 @@ function FieldEditor({
               value={otherValue ?? ""}
               onChange={(e) => onOtherChange?.(e.target.value)}
               placeholder="What field is it?"
-              className="mt-2 w-full rounded-xl border border-line px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-400"
+              className="mt-2 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors placeholder:text-neutral-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
             />
           )}
 
@@ -366,7 +368,7 @@ function FieldEditor({
                         : [...list, option.value]
                     )
                   }
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     selected
                       ? "border-indigo-400 bg-indigo-50 text-indigo-900"
                       : "border-line text-neutral-600 hover:bg-surface-soft"

@@ -26,6 +26,11 @@ export type ActionKind =
   // a different kind of promise than moving mail that already has.
   | "filter"
   | "trash"
+  // A reminder Nexus filed on the user's behalf from chat. Logged like
+  // any other action even though it touches nothing outside Nexus: the
+  // user asked for it in passing and may not look at the list for days,
+  // so "Nexus added this, here's the undo" is the only honest record.
+  | "task_create"
   // Calendar writes. Separate kinds because their undos are asymmetric:
   // an added event deletes cleanly, a deleted one comes back as a new
   // event with a new id.
@@ -45,6 +50,7 @@ export type UndoKind =
   | "untrash"
   | "delete_event"
   | "restore_event"
+  | "delete_task"
   | "none";
 
 export type ActionRecord = {
@@ -259,6 +265,9 @@ export const actionTarget = {
   event(fields: Record<string, string>): Record<string, string> {
     return fields;
   },
+  task(itemId: string): Record<string, string> {
+    return { itemId };
+  },
 };
 
 export function readMessageIds(target: Record<string, string>): string[] {
@@ -274,4 +283,8 @@ export function readDraftId(target: Record<string, string>): string | null {
 
 export function readLabelId(target: Record<string, string>): string | null {
   return target.labelId || null;
+}
+
+export function readItemId(target: Record<string, string>): string | null {
+  return target.itemId || null;
 }

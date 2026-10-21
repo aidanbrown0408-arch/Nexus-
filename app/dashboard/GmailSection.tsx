@@ -1,8 +1,12 @@
 "use client";
 
+import { PanelIcon, PanelIconButton } from "./PanelActions";
+import HousekeepingDrawer from "./HousekeepingDrawer";
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import DraftReply from "./DraftReply";
+import EmailBody from "./EmailBody";
+import AddTaskFromEmail from "./AddTaskFromEmail";
 
 type EmailSummary = {
   id: string;
@@ -18,6 +22,8 @@ type EmailSummary = {
 type Status =
   | { kind: "loading" }
   | { kind: "disconnected" }
+  // Connected once, but the token can no longer be refreshed.
+  | { kind: "expired" }
   | { kind: "connected" }
   | { kind: "error"; message: string };
 
@@ -85,8 +91,9 @@ export default function GmailSection({
   const [messages, setMessages] = useState<EmailSummary[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
-  // Which row is expanded. One at a time — the draft panel is tall, and a
-  // list of open drafts is a worse way to read an inbox than a closed one.
+  // Which row is expanded into the reading pane. One at a time — a full
+  // email is tall, and a list of open ones is a worse way to read an inbox
+  // than a closed one.
   const [openId, setOpenId] = useState<string | null>(null);
   // Expand / Collapse, as in the canvas: the panel can be folded down to
   // its one-line summary so the assistant gets the whole board.
@@ -109,6 +116,14 @@ export default function GmailSection({
         const body = await res.json().catch(() => ({}));
         if (body?.code === "not_connected") {
           setStatus({ kind: "disconnected" });
+          setMessages([]);
+          return;
+        }
+        // The grant is dead rather than the request being unlucky.
+        // Retrying is what the red box invites and the one thing that
+        // can't work, so this gets its own state with a link out.
+        if (body?.code === "reauth_required") {
+          setStatus({ kind: "expired" });
           setMessages([]);
           return;
         }
@@ -157,17 +172,30 @@ export default function GmailSection({
 
   // Turn the ?google=... hint from the OAuth callback into a banner, then
   // clean it out of the URL so refreshes don't re-show it.
-  const flash = searchParams.get("google");
+  //
+  // The banner text is copied into state first. It used to be read
+  // straight from the URL — and the very same effect strips it from the
+  // URL — so "access denied" or "something went wrong" rendered for one
+  // frame and vanished before anyone could read it.
+  const flashParam = searchParams.get("google");
+  const [flash, setFlash] = useState<string | null>(null);
   useEffect(() => {
-    if (!flash) return;
-    if (flash === "connected") {
+    if (!flashParam) return;
+    setFlash(flashParam);
+    if (flashParam === "connected" || flashParam === "partial") {
       // Reload messages now that we have tokens.
       fetchMessages();
     }
     const url = new URL(window.location.href);
     url.searchParams.delete("google");
+    // Rides along with google=partial from the OAuth callback. The
+    // Calendar panel reads the real answer from its own response rather
+    // than this hint, so the param has no job left once the redirect
+    // has landed — but leaving it behind means it survives every
+    // subsequent navigation.
+    url.searchParams.delete("calendarWrite");
     router.replace(url.pathname + (url.search ? url.search : ""));
-  }, [flash, fetchMessages, router]);
+  }, [flashParam, fetchMessages, router]);
 
   const connectHref = "/api/google/connect";
   const unreadCount = messages.filter((m) => m.unread).length;
@@ -176,50 +204,63 @@ export default function GmailSection({
     <section className="nx-board-panel">
       <header className="nx-board-head">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <h2 className="shrink-0 text-base font-semibold tracking-tight text-ink">
+          <h2 className="flex shrink-0 items-center gap-2 text-[17px] font-semibold tracking-tight text-ink">
             Inbox
+            {unreadCount > 0 && (
+              <span className="rounded-md bg-accent-50 px-1.5 py-0.5 text-[12px] font-semibold leading-none text-accent-700">
+                {unreadCount}
+              </span>
+            )}
           </h2>
-          <div className="flex shrink-0 items-center gap-3.5">
+          <div className="flex shrink-0 items-center gap-0.5">
+          {status.kind === "connected" && <HousekeepingDrawer />}
           {status.kind === "connected" && (
-            <button
-              type="button"
+            <PanelIconButton
+              icon="refresh"
+              label={loadingMessages ? "Refreshing…" : "Refresh inbox"}
               onClick={fetchMessages}
               disabled={loadingMessages}
-              className="text-[13px] font-semibold text-ink transition-colors hover:text-accent-600 disabled:opacity-60"
-            >
-              {loadingMessages ? "Refreshing…" : "Refresh"}
-            </button>
+              spinning={loadingMessages}
+            />
           )}
-          {status.kind === "disconnected" && (
+          {(status.kind === "disconnected" || status.kind === "expired") && (
             <a
               href={connectHref}
               className="nx-btn-primary nx-btn-sm"
             >
-              Connect Gmail
+              {status.kind === "expired" ? "Reconnect Gmail" : "Connect Gmail"}
             </a>
           )}
             {onToggleFocus && (
-              <button
-                type="button"
+              <PanelIconButton
+                icon={focused ? "minimize" : "maximize"}
+                label={focused ? "Exit full screen" : "Full screen"}
                 onClick={onToggleFocus}
-                aria-pressed={focused}
-                className="nx-board-toggle"
-              >
-                {focused ? "Exit full screen" : "Full screen"}
-              </button>
+                pressed={focused}
+              />
             )}
-            <button
-              type="button"
+            <PanelIconButton
+              icon={expanded ? "chevron-up" : "chevron-down"}
+              label={expanded ? "Collapse" : "Expand"}
               onClick={() => setExpanded((v) => !v)}
-              aria-expanded={expanded}
-              className="nx-board-toggle"
-            >
-              {expanded ? "Collapse" : "Expand"}
-            </button>
+              expanded={expanded}
+            />
           </div>
         </div>
-        <p className="nx-label truncate">
-          {unreadCount > 0 ? `${unreadCount} unread` : "All read"}
+        <p className="text-[13px] text-ink-ghost">
+          {status.kind === "loading"
+            ? "Checking your inbox…"
+            : status.kind === "disconnected"
+              ? "Gmail isn't connected"
+              : status.kind === "expired"
+                ? "Connection expired"
+                : status.kind === "error"
+                  ? "Couldn't reach Gmail"
+                  : unreadCount > 0
+                    ? `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`
+                    : loadingMessages && messages.length === 0
+                      ? "Loading…"
+                      : "You're all caught up"}
         </p>
       </header>
 
@@ -230,15 +271,28 @@ export default function GmailSection({
       ) : (
       <div className="nx-board-body">
 
-      {flash === "denied" && (
-        <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Gmail access was denied. You can try connecting again anytime.
-        </p>
-      )}
-      {flash === "error" && (
-        <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
-          Something went wrong connecting Gmail. Please try again.
-        </p>
+      {(flash === "denied" || flash === "error") && (
+        <div
+          role="status"
+          className={`mt-4 flex items-start gap-3 rounded-xl px-3 py-2 text-sm ${
+            flash === "denied"
+              ? "bg-amber-50 text-amber-800"
+              : "bg-red-50 text-red-800"
+          }`}
+        >
+          <p className="min-w-0 flex-1">
+            {flash === "denied"
+              ? "Gmail access was denied. You can try connecting again anytime."
+              : "Something went wrong connecting Gmail. Please try again."}
+          </p>
+          <button
+            type="button"
+            onClick={() => setFlash(null)}
+            className="shrink-0 text-xs font-medium underline underline-offset-2"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       <div className="mt-3">
@@ -258,6 +312,19 @@ export default function GmailSection({
           </p>
         )}
 
+        {status.kind === "expired" && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Your Google connection expired — Gmail stopped accepting it.{" "}
+            <a
+              href={connectHref}
+              className="font-medium underline underline-offset-2"
+            >
+              Reconnect Google
+            </a>{" "}
+            and your mail comes straight back.
+          </p>
+        )}
+
         {status.kind === "connected" && (
           <>
             {messagesError && (
@@ -273,7 +340,7 @@ export default function GmailSection({
                 No recent messages found.
               </p>
             ) : (
-              <ul className="flex flex-col gap-2">
+              <ul className="flex flex-col divide-y divide-line-soft">
                 {messages.map((msg) => {
                   const open = openId === msg.id;
                   const tint = AVATAR_TINTS[avatarTint(msg.fromEmail || msg.from)];
@@ -281,12 +348,16 @@ export default function GmailSection({
                     <li
                       key={msg.id}
                       className={
-                        "rounded-card border p-3.5 transition-colors " +
-                        (msg.unread
-                          ? "border-accent-100 bg-accent-50/60"
-                          : "border-line-soft bg-surface-soft")
+                        "relative rounded-lg py-3 pl-3.5 pr-2 transition-colors " +
+                        (open ? "bg-surface-soft" : "hover:bg-surface-soft")
                       }
                     >
+                      {msg.unread && (
+                        <span
+                          aria-label="Unread"
+                          className="absolute left-0.5 top-[26px] h-1.5 w-1.5 rounded-full bg-accent-600"
+                        />
+                      )}
                       <div className="flex items-start gap-3">
                         <span
                           aria-hidden
@@ -316,9 +387,14 @@ export default function GmailSection({
                               type="button"
                               onClick={() => setOpenId(open ? null : msg.id)}
                               aria-expanded={open}
-                              className="shrink-0 text-[13px] font-medium text-accent-600 transition-colors hover:text-accent-800"
+                              aria-label={open ? "Close message" : "Open message"}
+                              title={open ? "Close" : "Open"}
+                              className="-my-1 grid h-6 w-6 shrink-0 place-items-center rounded-md text-ink-wisp transition-colors hover:bg-surface-muted hover:text-ink"
                             >
-                              {open ? "Close" : "Reply"}
+                              <PanelIcon
+                                name={open ? "chevron-up" : "chevron-down"}
+                                size={14}
+                              />
                             </button>
                           </div>
 
@@ -335,25 +411,25 @@ export default function GmailSection({
                             >
                               {msg.subject}
                             </p>
-                            {msg.snippet && (
+                            {msg.snippet && !open && (
                               <p className="mt-[3px] truncate text-[13px] leading-normal text-ink-ghost">
                                 {msg.snippet}
                               </p>
                             )}
                           </button>
 
-                          <span
-                            className={
-                              "nx-chip-label mt-1 self-start rounded-full px-2 py-[2px] " +
-                              (msg.unread
-                                ? "bg-accent-100 text-accent-800"
-                                : "bg-surface-sunken text-ink-muted")
-                            }
-                          >
-                            {msg.unread ? "New" : "Read"}
-                          </span>
-
-                          {open && <DraftReply messageId={msg.id} />}
+                          {open && (
+                            <>
+                              <EmailBody messageId={msg.id} />
+                              <DraftReply messageId={msg.id} />
+                              <AddTaskFromEmail
+                                messageId={msg.id}
+                                threadId={msg.threadId}
+                                subject={msg.subject}
+                                from={msg.from}
+                              />
+                            </>
+                          )}
                         </div>
                       </div>
                     </li>
@@ -372,11 +448,11 @@ export default function GmailSection({
 
 function EmailListSkeleton() {
   return (
-    <ul className="flex flex-col gap-2">
-      {Array.from({ length: 4 }).map((_, i) => (
+    <ul className="flex flex-col divide-y divide-line-soft">
+      {Array.from({ length: 5 }).map((_, i) => (
         <li
           key={i}
-          className="flex items-start gap-3 rounded-card border border-line-soft bg-surface-soft p-3.5"
+          className="flex items-start gap-3 py-3.5"
         >
           <span className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-surface-sunken" />
           <div className="min-w-0 flex-1 space-y-2">

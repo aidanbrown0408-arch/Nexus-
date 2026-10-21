@@ -166,7 +166,7 @@ export default function TriageSection() {
   }
 
   return (
-    <section className="mt-8 w-full max-w-3xl rounded-panel border border-line bg-white p-6">
+    <section className="mt-8 w-full max-w-3xl rounded-panel border border-line bg-white p-6 shadow-raised">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold tracking-tight text-ink">Tidy up</h2>
@@ -181,7 +181,7 @@ export default function TriageSection() {
           <button
             type="button"
             onClick={scan}
-            className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+            className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
           >
             Scan my inbox
           </button>
@@ -344,14 +344,14 @@ export default function TriageSection() {
                   type="button"
                   onClick={archive}
                   disabled={checked.size === 0}
-                  className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Archive {checked.size}
                 </button>
                 <button
                   type="button"
                   onClick={() => setState({ kind: "idle" })}
-                  className="rounded-full border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
+                  className="rounded-lg border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
                 >
                   Cancel
                 </button>

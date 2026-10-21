@@ -8,13 +8,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // How far ahead the card can look. A week is the default because it's
-// the horizon most people actually plan against; the longer ranges exist
-// for "when am I free next month" questions.
+// the horizon most people actually plan against; a single day is for
+// "what's left of today", and the longer ranges exist for "when am I
+// free next month" questions.
 //
 // Whitelisted rather than free-form: `days` reaches a Google API call and
 // an iCloud time-range query, and an arbitrary number is an invitation to
 // ask for ten years of events and time the request out.
-const ALLOWED_DAYS = [7, 30, 90] as const;
+const ALLOWED_DAYS = [1, 7, 30, 90] as const;
 const DEFAULT_DAYS = 7;
 
 function daysFrom(request: NextRequest): number {
@@ -34,7 +35,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const days = daysFrom(request);
-    const result = await gatherEvents(userId, days);
+    // The board keeps today's finished events on screen — greyed out
+    // rather than gone. A calendar that empties itself as the day goes on
+    // can't answer "what did I have this morning", and at 6pm it was
+    // claiming the day had nothing on it at all.
+    const result = await gatherEvents(userId, days, undefined, {
+      includePast: true,
+    });
 
     // Nothing connected is the one case with a clear next step, so it
     // stays an error the UI can key off rather than an empty list.
@@ -57,6 +64,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       events: result.events,
       sources: { google: result.google, apple: result.apple },
+      // Separate from `sources` because it isn't a failure — the
+      // connection works, it just can't write. See googleCanWrite in
+      // lib/calendar-sources.ts.
+      googleCanWrite: result.googleCanWrite,
       // Echoed back so the card's copy describes the window it actually
       // got, not the one it asked for.
       days,

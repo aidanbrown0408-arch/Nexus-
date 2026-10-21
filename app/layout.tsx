@@ -1,13 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-// Instrument Sans for everything, IBM Plex Mono for the small uppercase
-// labels — the pairing the design canvas is built on.
-const sans = Instrument_Sans({
+// Inter for everything; IBM Plex Mono only for times and technical bits.
+const sans = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
   display: "swap",
 });
@@ -20,31 +19,61 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nexus",
-  description: "Your AI personal assistant for email and calendar",
+  title: {
+    default: "Nexus — An assistant you can just talk to",
+    template: "%s · Nexus",
+  },
+  description:
+    "Nexus reads your inbox and calendar, tells you what actually needs you today, and handles the replies and the scheduling while you keep moving.",
+  icons: {
+    icon: "/favicon.ico",
+  },
+  openGraph: {
+    title: "Nexus — An assistant you can just talk to",
+    description:
+      "One morning brief, edit-in-place actions, and voice or text — the same assistant either way.",
+    siteName: "Nexus",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "Nexus — An assistant you can just talk to",
+    description:
+      "One morning brief, edit-in-place actions, and voice or text — the same assistant either way.",
+  },
+};
+
+// themeColor lives here rather than in `metadata`. Next 14 moved it, and
+// leaving it in the metadata export logged an "Unsupported metadata"
+// warning on every route it rendered.
+export const viewport: Viewport = {
+  themeColor: "#F5F7FA",
+  width: "device-width",
+  initialScale: 1,
 };
 
 // Clerk's own UI is themed here so sign-in, sign-up and the user menu
-// sit in the same warm-paper, pill-shaped world as the rest of the app.
+// match the rest of the app.
 const clerkAppearance = {
   variables: {
-    colorPrimary: "#007781",
-    colorText: "#1B1A17",
-    colorTextSecondary: "#6B6862",
+    colorPrimary: "#155EEF",
+    colorText: "#101828",
+    colorTextSecondary: "#475467",
     colorBackground: "#FFFFFF",
-    colorInputBackground: "#FBFAF8",
-    colorInputText: "#1B1A17",
-    borderRadius: "9999px",
+    colorInputBackground: "#FFFFFF",
+    colorInputText: "#101828",
+    borderRadius: "8px",
     fontFamily: "var(--font-sans), system-ui, sans-serif",
   },
   elements: {
-    card: "rounded-[20px] border border-[#E4E1DA] shadow-none",
+    card: "rounded-[14px] border border-[#E4E7EC] shadow-[0_12px_16px_-4px_rgba(16,24,40,.08),0_4px_6px_-2px_rgba(16,24,40,.03)]",
     headerTitle: "tracking-tight",
     formButtonPrimary:
-      "rounded-full bg-[#007781] hover:bg-[#00606A] text-sm font-medium normal-case",
-    formFieldInput: "rounded-full border-[#E4E1DA] bg-[#FBFAF8]",
-    socialButtonsBlockButton: "rounded-full border-[#E4E1DA]",
-    footerActionLink: "text-[#007781] hover:text-[#00606A]",
+      "rounded-lg bg-[#155EEF] hover:bg-[#004EEB] text-sm font-semibold normal-case shadow-none",
+    formFieldInput:
+      "rounded-lg border-[#D0D5DD] bg-white focus:border-[#84ADFF] focus:ring-4 focus:ring-[#D1E0FF]",
+    socialButtonsBlockButton: "rounded-lg border-[#D0D5DD]",
+    footerActionLink: "text-[#155EEF] hover:text-[#004EEB] font-semibold",
   },
 };
 

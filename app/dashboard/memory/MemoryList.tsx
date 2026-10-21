@@ -116,7 +116,7 @@ export default function MemoryList() {
 
   if (!status.facts.length) {
     return (
-      <div className="mt-8 rounded-panel border border-line bg-white p-6">
+      <div className="mt-8 rounded-panel border border-line bg-white p-6 shadow-raised">
         <p className="text-sm text-neutral-600">
           Nothing yet. Nexus takes notes while it writes your morning
           brief, so this fills in over the first few days — and stays
@@ -133,7 +133,7 @@ export default function MemoryList() {
         return (
           <li
             key={fact.id}
-            className="rounded-2xl border border-line bg-white p-4"
+            className="rounded-xl border border-line bg-white p-4 shadow-raised transition-shadow hover:shadow-lifted"
           >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">

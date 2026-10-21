@@ -1,40 +1,42 @@
 import type { Config } from "tailwindcss";
 
-// Design tokens lifted from the Nexus design canvas (Nexus.dc.html).
+// Design tokens.
 //
 // The app was written against Tailwind's stock `neutral` and `indigo`
 // scales, so rather than rewriting several thousand class names we
-// redefine those two scales in terms of the design's palette. Every
-// existing `text-neutral-500` / `bg-indigo-600` in the codebase picks up
-// the new look for free, and the semantic aliases below (`canvas`,
-// `ink`, `line`, `accent`) are what new code should reach for.
-const stone = {
-  50: "#FBFAF8",  // surface, soft
-  100: "#F4F2EC", // surface, muted
-  200: "#E4E1DA", // hairline
-  300: "#DDD9D1", // hairline, stronger
-  400: "#B0ABA2", // text, faintest
-  500: "#9A968E", // text, tertiary
-  600: "#6B6862", // text, secondary
-  700: "#57544E", // text, body
-  800: "#2E2C27", // ink, hover
-  900: "#1B1A17", // ink
-  950: "#12110F",
+// redefine those two scales here. Every existing `text-neutral-500` /
+// `bg-indigo-600` picks up the palette for free, and the semantic
+// aliases below (`canvas`, `ink`, `line`, `accent`) are what new code
+// should reach for.
+//
+// Palette: cool, slightly blue-tinted grays and a confident blue accent —
+// a crisp, corporate look.
+const gray = {
+  50: "#F9FAFB",  // surface, soft
+  100: "#F2F4F7", // surface, muted
+  200: "#EAECF0", // hairline
+  300: "#D0D5DD", // hairline, stronger
+  400: "#98A2B3", // text, faintest
+  500: "#667085", // text, tertiary
+  600: "#475467", // text, secondary
+  700: "#344054", // text, body
+  800: "#1D2939", // ink, hover
+  900: "#101828", // ink
+  950: "#0C111D",
 };
 
-// oklch(0.52 0.09 205) and its neighbours, resolved to sRGB.
-const teal = {
-  50: "#EEF9FB",
-  100: "#D5F1F5",
-  200: "#B9E4E9",
-  300: "#96D0D7",
-  400: "#56A7B0",
-  500: "#238994",
-  600: "#007781",
-  700: "#00606A",
-  800: "#004A52",
-  900: "#00363C",
-  950: "#002024",
+const blue = {
+  50: "#EFF4FF",
+  100: "#D1E0FF",
+  200: "#B2CCFF",
+  300: "#84ADFF",
+  400: "#528BFF",
+  500: "#2970FF",
+  600: "#155EEF",
+  700: "#004EEB",
+  800: "#0040C1",
+  900: "#00359E",
+  950: "#002266",
 };
 
 const config: Config = {
@@ -46,32 +48,32 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        neutral: stone,
-        indigo: teal,
-        stone,
-        accent: teal,
-        canvas: "#F6F5F2",
+        neutral: gray,
+        indigo: blue,
+        stone: gray,
+        accent: blue,
+        canvas: "#F5F7FA",
         surface: {
           DEFAULT: "#FFFFFF",
-          soft: "#FBFAF8",
-          muted: "#F1EFEA",
-          sunken: "#F4F2EC",
+          soft: "#F9FAFB",
+          muted: "#F2F4F7",
+          sunken: "#F2F4F7",
         },
         line: {
-          DEFAULT: "#E4E1DA",
-          soft: "#EEEBE4",
-          strong: "#DDD9D1",
+          DEFAULT: "#E4E7EC",
+          soft: "#EEF0F3",
+          strong: "#D0D5DD",
         },
         ink: {
-          DEFAULT: "#1B1A17",
-          soft: "#2E2C27",
-          body: "#57544E",
-          muted: "#6B6862",
-          faint: "#8E8A82",
-          ghost: "#9A968E",
-          wisp: "#B0ABA2",
+          DEFAULT: "#101828",
+          soft: "#1D2939",
+          body: "#344054",
+          muted: "#475467",
+          faint: "#5D6679",
+          ghost: "#667085",
+          wisp: "#98A2B3",
         },
-        danger: "#B4402F",
+        danger: "#D92D20",
       },
       fontFamily: {
         // Wired up in app/layout.tsx via next/font.
@@ -79,21 +81,23 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       fontSize: {
-        display: ["60px", { lineHeight: "1.04", letterSpacing: "-0.03em" }],
+        display: ["56px", { lineHeight: "1.06", letterSpacing: "-0.03em" }],
       },
       letterSpacing: {
-        label: "0.14em",
-        eyebrow: "0.1em",
-        chip: "0.06em",
+        label: "0.08em",
+        eyebrow: "0.06em",
+        chip: "0.04em",
       },
       borderRadius: {
-        panel: "20px",
-        card: "16px",
-        well: "18px",
+        panel: "14px",
+        card: "12px",
+        well: "12px",
       },
       boxShadow: {
-        tab: "0 1px 2px rgba(27,26,23,.08)",
-        raised: "0 1px 2px rgba(27,26,23,.06)",
+        tab: "0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08)",
+        raised: "0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.05)",
+        lifted: "0 4px 8px -2px rgba(16,24,40,.08), 0 2px 4px -2px rgba(16,24,40,.04)",
+        pop: "0 12px 16px -4px rgba(16,24,40,.08), 0 4px 6px -2px rgba(16,24,40,.03)",
       },
       keyframes: {
         breathe: {

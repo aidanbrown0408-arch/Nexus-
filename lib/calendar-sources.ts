@@ -1,9 +1,12 @@
 import {
+  CALENDAR_EVENTS_SCOPE,
   CALENDAR_READONLY_SCOPE,
   getAuthorizedClientForUser,
   hasScope,
+  isGoogleAuthFailure,
 } from "./google";
 import { fetchUpcomingEvents, GOOGLE_MAX_EVENTS } from "./calendar";
+import { isPast } from "./calendar-window";
 import {
   APPLE_MAX_EVENTS,
   AppleAuthError,
@@ -12,6 +15,7 @@ import {
 } from "./apple";
 import { mergeEvents, type EventSummary, type RawEvent } from "./events";
 import { errorMessage } from "./supabase";
+import { getProfile } from "./profile";
 
 // One place that knows how many calendar services exist. Routes ask for
 // "the user's events" and get a single merged list back, plus a per-source
@@ -27,6 +31,10 @@ export type SourceStatus =
   | "not_connected"
   // Google only: connected, but the token predates the Calendar scope.
   | "scope_missing"
+  // Google only: the grant itself is dead — revoked, or expired the way
+  // a Testing-mode consent screen expires refresh tokens after a week.
+  // Not "error": retrying never fixes it, reconnecting always does.
+  | "auth_expired"
   // Apple only: the app-specific password was wrong or has been revoked.
   | "auth_failed"
   | "error";
@@ -35,6 +43,12 @@ export type GatheredEvents = {
   events: EventSummary[];
   google: SourceStatus;
   apple: SourceStatus;
+  // Whether Google granted the *write* scope, not just the read one.
+  // They're separate consents on the same screen, so an account can list
+  // events perfectly and refuse every edit and delete. The card needs to
+  // know up front: finding out by clicking Delete and getting a 403 is
+  // how this reads as a broken button rather than a missing permission.
+  googleCanWrite: boolean;
   // True when there were more events in the window than the limit
   // allowed. A truncated list looks exactly like a complete one, and a
   // calendar app that quietly hides your last three weeks is worse than
@@ -53,40 +67,54 @@ function defaultLimitFor(days: number): number {
 
 async function gatherGoogle(
   userId: string,
-  days: number
-): Promise<{ events: RawEvent[]; status: SourceStatus }> {
+  days: number,
+  timeZone: string | null
+): Promise<{ events: RawEvent[]; status: SourceStatus; canWrite: boolean }> {
   try {
     const client = await getAuthorizedClientForUser(userId);
-    if (!client) return { events: [], status: "not_connected" };
+    if (!client) return { events: [], status: "not_connected", canWrite: false };
 
     // Calendar was added after Gmail, so an account connected earlier
     // holds a token that predates the scope. The API would answer with a
     // bare 403; naming it here lets the UI offer a reconnect.
     if (!hasScope(client.credentials.scope, CALENDAR_READONLY_SCOPE)) {
-      return { events: [], status: "scope_missing" };
+      return { events: [], status: "scope_missing", canWrite: false };
     }
 
-    return { events: await fetchUpcomingEvents(client, days), status: "ok" };
+    return {
+      events: await fetchUpcomingEvents(client, days, timeZone),
+      status: "ok",
+      canWrite: hasScope(client.credentials.scope, CALENDAR_EVENTS_SCOPE),
+    };
   } catch (err: unknown) {
     const code =
       typeof err === "object" && err && "code" in err
         ? (err as { code: number }).code
         : null;
-    if (code === 403) return { events: [], status: "scope_missing" };
+    if (code === 403) {
+      return { events: [], status: "scope_missing", canWrite: false };
+    }
+    if (isGoogleAuthFailure(err)) {
+      return { events: [], status: "auth_expired", canWrite: false };
+    }
     console.error("Google Calendar fetch failed", errorMessage(err));
-    return { events: [], status: "error" };
+    return { events: [], status: "error", canWrite: false };
   }
 }
 
 async function gatherApple(
   userId: string,
-  days: number
+  days: number,
+  timeZone: string | null
 ): Promise<{ events: RawEvent[]; status: SourceStatus }> {
   try {
     const credentials = await getAppleCredentials(userId);
     if (!credentials) return { events: [], status: "not_connected" };
 
-    return { events: await fetchAppleEvents(credentials, days), status: "ok" };
+    return {
+      events: await fetchAppleEvents(credentials, days, timeZone),
+      status: "ok",
+    };
   } catch (err: unknown) {
     // App-specific passwords don't expire, but users do revoke them —
     // and unlike OAuth there's no refresh to attempt, so this always
@@ -99,27 +127,53 @@ async function gatherApple(
   }
 }
 
-// Events from now through `days` ahead, across every connected calendar
-// service, merged into one sorted list.
+// Events across every connected calendar service, merged into one sorted
+// list.
+//
+// Both sources now fetch from local midnight rather than from `now`, so
+// that the calendar board can show what already happened today instead of
+// announcing "nothing scheduled" at 6pm. Everything else that reads this
+// — the brief, chat, prep — wants what's still ahead, so finished events
+// are filtered back out here unless the caller asks for them.
 export async function gatherEvents(
   userId: string,
   days: number,
-  limit: number = defaultLimitFor(days)
+  limit: number = defaultLimitFor(days),
+  options: { includePast?: boolean; timeZone?: string | null } = {}
 ): Promise<GatheredEvents> {
+  // Which midnight the window starts at depends on whose calendar this
+  // is — see lib/calendar-window.ts for what went wrong when it didn't.
+  // Callers that already hold the profile pass the zone in; the rest
+  // pay one read for it rather than silently getting the host's.
+  let timeZone = options.timeZone ?? null;
+  if (!timeZone) {
+    try {
+      timeZone = (await getProfile(userId))?.timezone ?? null;
+    } catch (err) {
+      // A profile that can't be read is not a reason to show no
+      // calendar. resolveTimezone falls back to the host.
+      console.error("Calendar: timezone unavailable", errorMessage(err));
+    }
+  }
+
   // Sequential would mean waiting on a slow CalDAV round-trip before
   // Google even starts. Neither call depends on the other.
   const [google, apple] = await Promise.all([
-    gatherGoogle(userId, days),
-    gatherApple(userId, days),
+    gatherGoogle(userId, days, timeZone),
+    gatherApple(userId, days, timeZone),
   ]);
 
   // Merged without a cap first, so the count is known before anything is
   // discarded. Merging straight to `limit` would make a truncated list
   // indistinguishable from a complete one.
-  const merged = mergeEvents(
+  const mergedAll = mergeEvents(
     [google.events, apple.events],
     Number.MAX_SAFE_INTEGER
   );
+
+  const merged = options.includePast
+    ? mergedAll
+    : mergedAll.filter((event) => !isPast(event));
 
   // Truncation can happen twice: here, and inside each source, which
   // clips its own fetch before the merge ever sees it. Checking only the
@@ -137,6 +191,7 @@ export async function gatherEvents(
     events: merged.slice(0, limit),
     google: google.status,
     apple: apple.status,
+    googleCanWrite: google.canWrite,
     truncated: merged.length > limit || clippedUpstream,
   };
 }

@@ -2,15 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Nexus visual language, from the design canvas:
-   a warm paper canvas, white panels with hairline borders, fully-round
-   pills for every control, and IBM Plex Mono in uppercase for labels. */
+/* Nexus visual language: a cool light-gray canvas, white panels with
+   hairline borders and soft shadows, 8px-radius controls, a confident
+   blue accent, and small uppercase labels for section eyebrows. */
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     background: theme("colors.canvas");
     color: theme("colors.ink.DEFAULT");
     -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
     text-rendering: optimizeLegibility;
   }
 
@@ -58,21 +63,20 @@
 }
 
 @layer components {
-  /* Small uppercase mono labels — the eyebrows, timestamps and status
-     lines that carry most of the design's character. */
+  /* Small uppercase labels — eyebrows, timestamps and status lines. */
   .nx-label {
-    @apply font-mono text-[11px] uppercase tracking-eyebrow text-ink-ghost;
+    @apply text-[11px] font-medium uppercase tracking-eyebrow text-ink-ghost;
   }
   .nx-label-lg {
-    @apply font-mono text-[11px] uppercase tracking-label text-ink-ghost;
+    @apply text-xs font-semibold uppercase tracking-label text-accent-600;
   }
   .nx-chip-label {
-    @apply font-mono text-[10px] uppercase tracking-chip;
+    @apply text-[10.5px] font-medium uppercase tracking-chip;
   }
 
   /* Panels. The dashboard is a board of these. */
   .nx-panel {
-    @apply rounded-panel border border-line bg-white;
+    @apply rounded-panel border border-line bg-white shadow-raised;
   }
   .nx-card {
     @apply rounded-card border border-line-soft bg-white;
@@ -81,35 +85,36 @@
     @apply rounded-well border border-line-soft bg-surface-soft;
   }
 
-  /* Controls. Everything is a pill. */
+  /* Controls. */
   .nx-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-[18px] py-2.5
-           text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+           text-sm font-semibold transition-all duration-150 active:scale-[0.98]
+           disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100;
   }
   .nx-btn-primary {
-    @apply nx-btn bg-accent-600 text-white hover:bg-accent-700;
+    @apply nx-btn bg-accent-600 text-white shadow-raised hover:bg-accent-700;
   }
   .nx-btn-ink {
-    @apply nx-btn bg-ink text-white hover:bg-ink-soft;
+    @apply nx-btn bg-ink text-white shadow-raised hover:bg-ink-soft;
   }
   .nx-btn-quiet {
-    @apply nx-btn border border-line bg-white text-ink hover:bg-surface-soft;
+    @apply nx-btn border border-line-strong bg-white text-ink-body shadow-raised hover:bg-surface-soft hover:text-ink;
   }
   .nx-btn-ghost {
-    @apply nx-btn bg-transparent text-ink-muted hover:text-ink;
+    @apply nx-btn bg-transparent text-ink-muted hover:bg-surface-muted hover:text-ink;
   }
   .nx-btn-sm {
-    @apply px-4 py-2 text-[13px];
+    @apply px-3.5 py-2 text-[13px];
   }
 
-  /* Segmented control (Voice / Text, calendar views). A cream track with
-     the active tab lifted out of it in white. */
+  /* Segmented control (Voice / Text, calendar views). A gray track with
+     the active option lifted out of it in white. */
   .nx-segment {
-    @apply inline-flex gap-1 rounded-full border border-line/70 bg-surface-muted p-1;
+    @apply inline-flex gap-0.5 rounded-lg border border-line bg-surface-muted p-0.5;
   }
   .nx-segment > button {
-    @apply rounded-full px-6 py-2 text-[15px] font-medium text-ink-muted
-           transition-all duration-200 hover:text-ink;
+    @apply rounded-md px-5 py-1.5 text-sm font-medium text-ink-muted
+           transition-all duration-150 hover:text-ink;
   }
   .nx-segment > button[data-active="true"] {
     @apply bg-white text-ink shadow-tab hover:text-ink;
@@ -117,41 +122,41 @@
 
   /* Suggestion / filter chips. */
   .nx-chip {
-    @apply rounded-full border border-line bg-surface-soft px-4 py-2 text-sm
-           text-ink-body transition-colors hover:bg-surface-muted hover:text-ink;
+    @apply rounded-lg border border-line bg-white px-3.5 py-2 text-sm
+           text-ink-body shadow-raised transition-colors hover:border-accent-200 hover:bg-accent-50 hover:text-accent-800;
   }
   .nx-tag {
-    @apply nx-chip-label rounded-full bg-surface-sunken px-2.5 py-[3px] text-ink-muted;
+    @apply nx-chip-label rounded-md bg-surface-muted px-2 py-[3px] text-ink-muted;
   }
 
   /* Fields. */
   .nx-input {
-    @apply w-full rounded-full border border-line bg-surface-soft px-4 py-2.5 text-sm
-           text-ink outline-none transition-colors placeholder:text-ink-ghost
-           focus:border-accent-600;
+    @apply w-full rounded-lg border border-line-strong bg-white px-3.5 py-2.5 text-sm
+           text-ink shadow-raised outline-none transition-shadow placeholder:text-ink-wisp
+           focus:border-accent-300 focus:ring-4 focus:ring-accent-100;
   }
   .nx-textarea {
-    @apply w-full rounded-xl border border-line bg-white px-3.5 py-3 text-sm leading-relaxed
-           text-ink outline-none transition-colors placeholder:text-ink-ghost
-           focus:border-accent-600;
+    @apply w-full rounded-lg border border-line-strong bg-white px-3.5 py-3 text-sm leading-relaxed
+           text-ink shadow-raised outline-none transition-shadow placeholder:text-ink-wisp
+           focus:border-accent-300 focus:ring-4 focus:ring-accent-100;
   }
 
   /* A column of the dashboard board: fills the row height, scrolls its
      own content, and never pushes the board taller. */
   .nx-board-panel {
-    @apply flex h-full min-h-0 flex-col overflow-hidden rounded-panel border border-line bg-white p-5;
+    @apply flex h-full min-h-0 flex-col overflow-hidden rounded-panel border border-line bg-white p-5 shadow-raised;
   }
   .nx-board-head {
-    @apply flex shrink-0 flex-col gap-1 border-b border-line-soft pb-3;
+    @apply -mx-5 -mt-5 mb-1 flex shrink-0 flex-col gap-1 border-b border-line bg-surface-soft/60 px-5 pb-3.5 pt-4;
   }
   .nx-board-body {
     @apply -mr-1 min-h-0 flex-1 overflow-y-auto pr-1;
   }
   .nx-board-toggle {
-    @apply text-[13px] font-medium text-ink-ghost transition-colors hover:text-ink;
+    @apply rounded-md px-2 py-1 text-[13px] font-medium text-ink-ghost transition-colors hover:bg-surface-muted hover:text-ink;
   }
 
-  /* The orb: a raised cream sphere on the paper canvas, with the
+  /* The orb: a raised pearl sphere on the canvas, with the
      waveform sitting inside it. The halo behind it breathes; the sphere
      itself stays still so the bars are the only thing moving. */
   .nx-orb {
@@ -160,25 +165,125 @@
       radial-gradient(
         circle at 38% 30%,
         #ffffff 0%,
-        #fdfcfa 38%,
-        #f2efe8 72%,
-        #ebe7de 100%
+        #fbfcfe 38%,
+        #eef2f8 72%,
+        #e4e9f2 100%
       );
     box-shadow:
-      0 24px 60px -20px rgba(27, 26, 23, 0.16),
-      0 4px 14px -4px rgba(27, 26, 23, 0.06),
+      0 24px 60px -20px rgba(16, 24, 40, 0.16),
+      0 4px 14px -4px rgba(16, 24, 40, 0.06),
       inset 0 1px 0 rgba(255, 255, 255, 0.9),
-      inset 0 -14px 30px -18px rgba(27, 26, 23, 0.12);
+      inset 0 -14px 30px -18px rgba(16, 24, 40, 0.12);
   }
-  .nx-orb::before {
-    content: "";
-    @apply absolute rounded-full animate-breathe;
-    inset: -12%;
+  /* The halo is a real element (see Orb.tsx) rather than a ::before at
+     z-index -1, which used to sink behind the white panel it sat in. */
+  .nx-orb-halo {
+    @apply pointer-events-none absolute rounded-full animate-breathe;
+    inset: -14%;
     z-index: -1;
     background: radial-gradient(
       circle at 50% 50%,
       theme("colors.accent.100") 0%,
-      transparent 68%
+      rgba(209, 224, 255, 0.35) 45%,
+      transparent 70%
     );
+    transition: opacity 400ms ease;
+  }
+  .nx-orb-bar {
+    transform-origin: center;
+    transition: height 350ms ease;
+  }
+
+  /* Speech bubbles in Voice mode: a card with a little tail pointing up
+     at the orb, so the words read as coming from it. */
+  .nx-speech {
+    @apply relative rounded-2xl border border-line bg-white px-5 py-4 shadow-lifted;
+    animation: nx-pop 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  }
+  .nx-speech::before {
+    content: "";
+    @apply absolute left-1/2 h-3.5 w-3.5 border-l border-t border-line bg-white;
+    top: -7.5px;
+    transform: translateX(-50%) rotate(45deg);
+    border-top-left-radius: 3px;
+  }
+  .nx-speech-user {
+    @apply border-accent-200 bg-accent-50;
+  }
+  .nx-speech-user::before {
+    @apply border-accent-200 bg-accent-50;
+  }
+
+  /* Typing indicator. */
+  .nx-typing-dot {
+    @apply inline-block h-[7px] w-[7px] rounded-full bg-ink-wisp;
+    animation: nx-typing 1.1s ease-in-out infinite;
+  }
+
+  /* Blinking caret after live dictation. */
+  .nx-caret {
+    @apply ml-0.5 inline-block h-[1.1em] w-[2px] translate-y-[3px] rounded-full bg-accent-600;
+    animation: nx-blink 1s steps(2, start) infinite;
+  }
+
+  /* Sidebar navigation (desktop). */
+  .nx-nav-item {
+    @apply relative flex h-10 items-center gap-3 rounded-lg px-3 text-[14px] font-medium text-ink-muted transition-colors hover:bg-white hover:text-ink;
+  }
+  .nx-nav-item[aria-current="page"] {
+    @apply bg-white text-ink shadow-tab;
+  }
+  .nx-nav-item[aria-current="page"]::before {
+    content: "";
+    @apply absolute -left-3 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-600;
+  }
+}
+
+@keyframes nx-wave {
+  0%,
+  100% {
+    transform: scaleY(0.38);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes nx-typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes nx-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes nx-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-orb-bar,
+  .nx-orb-halo,
+  .nx-typing-dot,
+  .nx-speech {
+    animation: none !important;
   }
 }

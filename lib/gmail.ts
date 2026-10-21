@@ -60,9 +60,23 @@ function extractPlainText(payload: GmailPart | undefined | null): string {
   return "";
 }
 
-// Fetch the most recent messages for the account `client` is authorized
-// against, newest first. Throws whatever the Gmail API throws; callers
-// are responsible for turning that into a response.
+// Fetch the most recent messages in the user's inbox, newest first.
+// Throws whatever the Gmail API throws; callers are responsible for
+// turning that into a response.
+//
+// Two things here were wrong for a long time.
+//
+// `q: "in:inbox"` was missing, so this listed *all* mail. The Gmail API
+// excludes Spam and Trash by default but not Sent or Drafts — so the
+// panel titled "Inbox" was showing the user their own sent replies and
+// half-written drafts interleaved with real mail, and the brief was
+// reading them as part of the inbox.
+//
+// And it asked for `format: "full"`, which downloads every message body
+// — base64 HTML and all — for twenty to forty messages, in order to
+// take the first hundred characters of one. `metadata` carries the
+// headers plus Gmail's own `snippet`, which is already clean prose and
+// already about the right length. Same list, a fraction of the bytes.
 export async function fetchRecentMessages(
   client: OAuth2Client,
   limit: number
@@ -70,20 +84,34 @@ export async function fetchRecentMessages(
   const gmail = google.gmail({ version: "v1", auth: client });
   const list = await gmail.users.messages.list({
     userId: "me",
+    q: "in:inbox",
     maxResults: limit,
   });
 
   const ids = (list.data.messages ?? []).map((m) => m.id!).filter(Boolean);
   if (!ids.length) return [];
 
-  const details = await Promise.all(
+  // allSettled, not all: Gmail rate-limits per-user, and one 429 among
+  // twenty parallel gets used to reject the whole batch and empty the
+  // panel. Nineteen messages is a better answer than none.
+  const settled = await Promise.allSettled(
     ids.map((id) =>
       gmail.users.messages.get({
         userId: "me",
         id,
-        format: "full",
+        format: "metadata",
+        metadataHeaders: ["From", "Subject", "Date"],
       })
     )
+  );
+
+  const failed = settled.filter((r) => r.status === "rejected").length;
+  if (failed) {
+    console.error(`Gmail: ${failed} of ${ids.length} message reads failed`);
+  }
+
+  const details = settled.flatMap((r) =>
+    r.status === "fulfilled" ? [r.value] : []
   );
 
   const messages: EmailSummary[] = details.map((res) => {
@@ -96,8 +124,8 @@ export async function fetchRecentMessages(
     const fromRaw = getHeader("From");
     const { name: fromName, email: fromEmail } = parseFromHeader(fromRaw);
 
-    const body = extractPlainText(m.payload as GmailPart) || m.snippet || "";
-    const snippet = body.slice(0, 100);
+    // Gmail's own snippet, which is already stripped of markup.
+    const snippet = (m.snippet ?? "").slice(0, 160);
 
     const dateHeader = getHeader("Date");
     const dateMs = m.internalDate ? Number(m.internalDate) : Date.parse(dateHeader);
@@ -119,7 +147,10 @@ export async function fetchRecentMessages(
     };
   });
 
-  messages.sort((a, b) => (a.date < b.date ? 1 : -1));
+  // Newest first. ISO-8601 strings sort lexicographically, and a
+  // comparator has to be able to say "equal" — the old one returned -1
+  // for a tie, which is not a consistent ordering.
+  messages.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
   return messages;
 }
@@ -155,6 +186,11 @@ export type EmailThread = {
 // chains are mostly repetition of earlier messages we're already passing.
 const MAX_BODY_CHARS = 4000;
 
+// The cap for the reading pane. Generous enough that ordinary mail is
+// never cut, low enough that one runaway newsletter can't wedge the
+// response.
+const MAX_FULL_BODY_CHARS = 200_000;
+
 // Strip the quoted copy of the previous message that clients append below
 // a reply. Without this, a five-message thread hands the model the first
 // message five times over.
@@ -169,9 +205,15 @@ function stripQuotedReply(body: string): string {
 
 // Fetch a whole thread, oldest message first. Callers pass a message id —
 // Gmail resolves it to the thread that message belongs to.
+//
+// `full` is for the reading pane rather than the model: it keeps the
+// quoted reply chain and lifts the per-message cap, because a person
+// reading their own mail expects to see all of it, while a draft prompt
+// is better off without five copies of the same paragraph.
 export async function fetchThread(
   client: OAuth2Client,
-  messageId: string
+  messageId: string,
+  opts: { full?: boolean } = {}
 ): Promise<EmailThread> {
   const gmail = google.gmail({ version: "v1", auth: client });
 
@@ -216,7 +258,9 @@ export async function fetchThread(
       date: Number.isFinite(dateMs)
         ? new Date(dateMs).toISOString()
         : new Date().toISOString(),
-      body: stripQuotedReply(body).slice(0, MAX_BODY_CHARS),
+      body: opts.full
+        ? body.slice(0, MAX_FULL_BODY_CHARS)
+        : stripQuotedReply(body).slice(0, MAX_BODY_CHARS),
     };
   });
 

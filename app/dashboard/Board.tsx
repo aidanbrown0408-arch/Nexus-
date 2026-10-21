@@ -1,53 +1,93 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useUser } from "@clerk/nextjs";
 import BriefSection from "./BriefSection";
 import ChatSection from "./ChatSection";
 import GmailSection from "./GmailSection";
 import CalendarSection from "./CalendarSection";
 
-type Focus = "gmail" | "calendar" | null;
-
-// The three-column board, plus a full screen mode for the Inbox and
-// Calendar panels. Full screen collapses the assistant down to a slim bar
-// — orb, status, Voice/Text — pinned above whichever panel took over the
-// row, so you can keep talking to Nexus without leaving the expanded
-// view. Brief and the other panel step aside entirely; there's nothing
-// else to look at while one thing has the floor.
-export default function Board() {
-  const [focus, setFocus] = useState<Focus>(null);
-
-  if (focus) {
-    return (
-      <div className="flex flex-col gap-4 py-4 lg:h-[calc(100vh-11.5rem)]">
-        <ChatSection variant="compact" onExitFocus={() => setFocus(null)} />
-        <div className="min-h-0 flex-1">
-          {focus === "gmail" ? (
-            <GmailSection focused onToggleFocus={() => setFocus(null)} />
-          ) : (
-            <CalendarSection focused onToggleFocus={() => setFocus(null)} />
-          )}
-        </div>
-      </div>
-    );
-  }
+// The Home page: a greeting, then three columns — inbox on the left, the
+// assistant in the middle with the morning brief under it, calendar on
+// the right. Below lg it stacks, assistant first, since on a phone the
+// thing you came to do is talk to it.
+//
+// The full-screen buttons change the page (to the Email / Calendar
+// views) rather than holding their own state, so there's one source of
+// truth for which view you're on.
+export default function Board({
+  onOpenPage,
+}: {
+  onOpenPage: (view: "email" | "calendar") => void;
+}) {
+  // When the brief is open it takes the middle column, and the assistant
+  // folds down to its slim bar above it — so you can read the brief and
+  // still ask about it.
+  const [briefOpen, setBriefOpen] = useState(false);
 
   return (
-    <div className="grid grid-cols-1 gap-4 py-4 lg:h-[calc(100vh-11.5rem)] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.25fr)_minmax(0,0.9fr)]">
-      <div className="order-2 h-[60vh] lg:order-1 lg:h-full lg:min-h-0">
-        <GmailSection onToggleFocus={() => setFocus("gmail")} />
-      </div>
+    <div className="flex flex-col gap-5 py-6 lg:h-screen lg:py-7">
+      <Greeting />
 
-      <div className="order-1 flex min-h-[60vh] flex-col gap-4 lg:order-2 lg:h-full lg:min-h-0">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <ChatSection />
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.25fr)_minmax(0,0.9fr)]">
+        <div className="order-2 h-[60vh] lg:order-1 lg:h-full lg:min-h-0">
+          <GmailSection onToggleFocus={() => onOpenPage("email")} />
         </div>
-        <BriefSection />
-      </div>
 
-      <div className="order-3 h-[60vh] lg:h-full lg:min-h-0">
-        <CalendarSection onToggleFocus={() => setFocus("calendar")} />
+        <div className="order-1 flex min-h-[60vh] flex-col gap-4 lg:order-2 lg:h-full lg:min-h-0">
+          {/* Both shapes read the same conversation (ChatContext), so
+              opening the brief no longer throws it away. */}
+          {briefOpen ? (
+            <ChatSection variant="compact" />
+          ) : (
+            <div className="min-h-[520px] flex-1 lg:min-h-0">
+              <ChatSection />
+            </div>
+          )}
+          <BriefSection onOpenChange={setBriefOpen} />
+        </div>
+
+        <div className="order-3 h-[60vh] lg:h-full lg:min-h-0">
+          <CalendarSection onToggleFocus={() => onOpenPage("calendar")} />
+        </div>
       </div>
+    </div>
+  );
+}
+
+// "Good morning, Aidan" plus the date. Computed after mount so the
+// server's clock and timezone never leak into the greeting.
+function Greeting() {
+  const { user } = useUser();
+  const [now, setNow] = useState<Date | null>(null);
+
+  useEffect(() => {
+    setNow(new Date());
+  }, []);
+
+  const hour = now?.getHours() ?? 12;
+  const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+  const name = user?.firstName;
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-end justify-between gap-x-6 gap-y-1">
+      <div className="min-w-0">
+        <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink sm:text-[28px]">
+          {now ? `Good ${part}${name ? `, ${name}` : ""}` : " "}
+        </h1>
+        <p className="mt-1 text-[15px] text-ink-muted">
+          Here&apos;s what&apos;s happening across your inbox and calendar.
+        </p>
+      </div>
+      {now && (
+        <p className="text-[15px] font-medium text-ink-ghost">
+          {now.toLocaleDateString(undefined, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+          })}
+        </p>
+      )}
     </div>
   );
 }

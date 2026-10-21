@@ -9,8 +9,13 @@ import {
   releaseDelivery,
 } from "@/lib/deliveries";
 import { listDeliveryCandidates, type DeliveryCandidate } from "@/lib/profile";
-import { deliveryWindow, type DeliveryWindow } from "@/lib/schedule";
+import {
+  deliveryWindow,
+  GRACE_HOURS,
+  type DeliveryWindow,
+} from "@/lib/schedule";
 import { errorMessage } from "@/lib/supabase";
+import { secretsMatch } from "@/lib/crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,9 +120,12 @@ export async function GET(request: NextRequest) {
   // Vercel Cron sends this header; anything else reaching this route is
   // someone poking at it. Without the check, a stranger could make you
   // pay for a model call per request.
+  // Compared in constant time. A plain `!==` on a secret leaks its
+  // prefix through timing, and lib/crypto already has the primitive —
+  // there was no reason this one check wasn't using it.
   const secret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  if (!secret || auth !== `Bearer ${secret}`) {
+  const presented = request.headers.get("authorization");
+  if (!secret || !presented || !secretsMatch(presented, `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -129,6 +137,22 @@ export async function GET(request: NextRequest) {
   const startedAt = Date.now();
   const now = new Date();
   const candidates = await listDeliveryCandidates();
+
+  // Who was eligible but not in their window right now.
+  //
+  // This number is the single best signal that the cron is not running
+  // often enough. The schedule in lib/schedule.ts only answers yes
+  // within GRACE_HOURS of a user's chosen morning, which assumes this
+  // route is invoked hourly. Invoked once a day instead, it can only
+  // ever serve the users whose morning happens to fall in that one
+  // hour's window, and everyone else is skipped silently, forever —
+  // which is indistinguishable from the feature working.
+  //
+  // So it is said out loud. If `notDue` is large on every run and
+  // `due` is a small, unchanging set, the cron frequency is the bug.
+  const notDue = candidates.length - candidates
+    .filter((candidate) => deliveryWindow(candidate, now) !== null).length;
+
   const due = candidates
     .map((candidate) => ({ candidate, window: deliveryWindow(candidate, now) }))
     .filter(
@@ -147,6 +171,15 @@ export async function GET(request: NextRequest) {
   }
 
   console.log(`[cron] ${due.length} of ${candidates.length} due this hour`);
+  if (notDue > 0) {
+    console.log(
+      `[cron] ${notDue} eligible user(s) outside their ${GRACE_HOURS}h ` +
+        "window on this run. That is expected when the cron fires hourly " +
+        "and most people's morning is not now. If this route runs less " +
+        "often than hourly, those users are never served — see " +
+        "vercel.json and the scheduling section of SETUP.md."
+    );
+  }
 
   // Sequential on purpose. Each delivery is a model call and an inbox
   // read; running the whole list at once would spike every upstream rate
@@ -175,5 +208,13 @@ export async function GET(request: NextRequest) {
     console.log(`[cron] ${deferred} deferred to the next run — out of time`);
   }
 
-  return NextResponse.json({ due: due.length, deferred, outcomes });
+  return NextResponse.json({
+    due: due.length,
+    // Surfaced in the response as well as the log, so a manual curl
+    // against this route shows the same thing without digging.
+    eligible: candidates.length,
+    notDue,
+    deferred,
+    outcomes,
+  });
 }

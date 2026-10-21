@@ -1,4 +1,7 @@
-import { getAuthorizedClientForUser } from "@/lib/google";
+import {
+  getAuthorizedClientForUser,
+  isGoogleAuthFailure,
+} from "@/lib/google";
 import { fetchRecentMessages } from "@/lib/gmail";
 import { gatherEvents } from "@/lib/calendar-sources";
 import { listPrepItems } from "@/lib/prep";
@@ -642,7 +645,10 @@ export async function generateBrief(
     // list and never learns there are two services behind it.
     const [messagesResult, eventsResult] = await Promise.allSettled([
       fetchRecentMessages(client, MESSAGE_FETCH_LIMIT),
-      gatherEvents(userId, CALENDAR_DAYS),
+      // The zone is already resolved above; passing it saves
+      // gatherEvents a second profile read and keeps the window's
+      // midnight and this brief's "today" in agreement.
+      gatherEvents(userId, CALENDAR_DAYS, undefined, { timeZone }),
     ]);
 
     // Mail is optional here the same way calendar is: a brief built
@@ -711,14 +717,22 @@ export async function generateBrief(
     }
   } catch (err: unknown) {
     console.error("Brief data fetch failed", errorMessage(err));
-    const code =
-      typeof err === "object" && err && "code" in err
-        ? (err as { code: number }).code
-        : null;
+    // Same distinction the cards make: a dead grant is a reconnect, not
+    // a retry. Without this the brief reads "Unavailable" forever and
+    // never says why.
+    if (isGoogleAuthFailure(err)) {
+      return {
+        ok: false,
+        error:
+          "Your Google connection has expired — reconnect to restore access.",
+        code: "reauth_required",
+        status: 401,
+      };
+    }
     return {
       ok: false,
       error: "Failed to load your mail and calendar",
-      status: code === 401 ? 401 : 500,
+      status: 500,
     };
   }
 

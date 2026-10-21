@@ -130,7 +130,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
         <button
           type="submit"
           disabled={submitting || !appleId || !appPassword}
-          className="rounded-full bg-neutral-900 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-neutral-900 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {/* Verified against iCloud before saving, so this can take a
               second or two — say so rather than looking frozen. */}
@@ -140,7 +140,7 @@ export default function AppleConnectForm({ onConnected, onCancel }: Props) {
           type="button"
           onClick={onCancel}
           disabled={submitting}
-          className="rounded-full px-3 py-1.5 text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900 disabled:opacity-60"
+          className="rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900 disabled:opacity-60"
         >
           Cancel
         </button>

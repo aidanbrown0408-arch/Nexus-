@@ -26,6 +26,19 @@ export type EventSummary = {
   // event. Null when the event didn't come with one — an event Nexus
   // can't write to.
   calendarId: string | null;
+  // Whether this account can actually change this event, as opposed to
+  // merely see it.
+  //
+  // The Upcoming list is built from every calendar the user can *read*,
+  // which includes calendars shared with them at reader access and
+  // subscribed feeds. Google answers a delete on one of those with a
+  // bare 403 "Forbidden" — no reason, nothing a reconnect fixes. The
+  // Edit and Delete controls used to be offered on those events anyway,
+  // gated only on knowing which calendar the event was on, so the only
+  // way to discover a read-only calendar was to try to change it and
+  // fail. Google reports the access role on the calendar list; this
+  // carries that decision to the UI instead.
+  canWrite: boolean;
   // The CalDAV object URL for this event's .ics resource. Apple-only —
   // this is what actually addresses a single event for update or delete
   // over CalDAV, since `id` there is just the iCalendar UID and doesn't
@@ -96,8 +109,19 @@ function dedupeKeys(event: RawEvent): string[] {
   // eventKey below already reasoned this out for its own key ("otherwise
   // 'print the agenda' would be checked off for every future Tuesday at
   // once"); the dedupe key never had the same treatment applied.
+  //
+  // The title+time signature below is a fallback for events with no UID
+  // at all, not an extra key added on top of a real one. It used to run
+  // unconditionally — every event, UID or not, got a `sig:` key pushed
+  // alongside its `uid:` key — so two genuinely different events on two
+  // different calendars that happened to share a title and a time (a
+  // generic "Lunch" on both Work and Life, say) collided on that `sig:`
+  // key and one silently vanished from the merged list. Whichever
+  // calendar's copy came first "won"; the other one's event just
+  // disappeared rather than showing up under its own, correct calendar.
   if (event.uid) {
     keys.push(`uid:${event.uid.trim().toLowerCase()}|${instant(event.start)}`);
+    return keys;
   }
   keys.push(
     `sig:${event.summary.trim().toLowerCase()}|${instant(event.start)}|${instant(
@@ -120,19 +144,57 @@ function instant(iso: string): number {
 // Order matters: earlier lists win a tie. Pass Google first — its events
 // carry attendee counts and Meet links that the CalDAV copy of the same
 // meeting usually doesn't, so the richer record is the one that survives.
+//
+// With one exception, learned the hard way. Someone whose iCloud
+// calendars are also subscribed into Google has two copies of every
+// event, and the Google copy of a subscribed calendar is *read-only* —
+// Google answers any change to it with a bare 403 "Forbidden". Taking
+// the Google copy unconditionally therefore handed the UI the one copy
+// of the event that could not be edited or deleted, while the writable
+// iCloud copy sat right there in the other list. The symptom was a
+// Delete button that failed every time on an event the user plainly
+// owns, with an error blaming permissions that had in fact been
+// granted.
+//
+// So richer still wins — but never at the cost of writable. A copy that
+// can be changed displaces one that can't.
 export function mergeEvents(
   lists: RawEvent[][],
   limit: number
 ): EventSummary[] {
-  const seen = new Set<string>();
+  // Maps each dedupe key to where its event sits in `merged`, so a
+  // later duplicate can replace the earlier one rather than only being
+  // dropped.
+  const seen = new Map<string, number>();
   const merged: EventSummary[] = [];
 
   for (const list of lists) {
     for (const event of list) {
       const keys = dedupeKeys(event);
-      if (keys.some((k) => seen.has(k))) continue;
-      keys.forEach((k) => seen.add(k));
+
+      let index: number | undefined;
+      for (const k of keys) {
+        const found = seen.get(k);
+        if (found !== undefined) {
+          index = found;
+          break;
+        }
+      }
+
+      if (index !== undefined) {
+        const kept = merged[index];
+        if (!kept.canWrite && event.canWrite) {
+          // The identity stays the one already assigned. Prep
+          // checklists hang off `key`, and swapping which copy is shown
+          // shouldn't detach them.
+          merged[index] = { ...event, key: kept.key };
+          keys.forEach((k) => seen.set(k, index as number));
+        }
+        continue;
+      }
+
       merged.push({ ...event, key: eventKey(event) });
+      keys.forEach((k) => seen.set(k, merged.length - 1));
     }
   }
 

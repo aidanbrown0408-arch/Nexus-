@@ -119,7 +119,7 @@ export default function FindTime({ guests, onPick }: Props) {
           type="button"
           onClick={search}
           disabled={state.kind === "searching"}
-          className="rounded-full bg-neutral-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-60"
+          className="rounded-lg bg-neutral-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-neutral-800 disabled:opacity-60"
         >
           {state.kind === "searching" ? "Looking…" : "Search"}
         </button>
@@ -177,7 +177,7 @@ export default function FindTime({ guests, onPick }: Props) {
                     <button
                       type="button"
                       onClick={() => onPick(slot)}
-                      className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-900 transition-colors hover:bg-indigo-100"
+                      className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-900 transition-colors hover:bg-indigo-100"
                     >
                       {formatSlot(slot)}
                     </button>

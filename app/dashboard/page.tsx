@@ -1,12 +1,8 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { hasSeenOnboarding } from "@/lib/profile";
 import { errorMessage } from "@/lib/supabase";
-import Board from "./Board";
-import TriageSection from "./TriageSection";
-import FiltersSection from "./FiltersSection";
+import DashboardTabs from "./DashboardTabs";
 
 // This page is user-specific (its content depends on who's signed in),
 // so it should never be statically prerendered at build time.
@@ -36,69 +32,17 @@ export default async function DashboardPage() {
   }
   if (!seen) redirect("/onboarding");
 
-  const today = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-6">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-line py-6">
-        <div className="flex items-baseline gap-2.5">
-          <span className="text-lg font-semibold tracking-tight">Nexus</span>
-          <span className="nx-label whitespace-nowrap">{today}</span>
-        </div>
+    <main className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col px-4 sm:px-6 lg:px-8">
+      {/* The tab strip, and whichever page it's on.
+          The default is the board: inbox on the left, the assistant in
+          the middle with the morning brief folded underneath it, calendar
+          on the right — the three-column arrangement from the design
+          canvas. Below the lg breakpoint it stacks, assistant first,
+          since on a phone the thing you came to do is talk to it. The
+          other tabs give one panel the whole width. */}
+      <DashboardTabs />
 
-        <div className="flex items-center gap-3.5">
-          <nav className="hidden items-center gap-3.5 md:flex">
-            <Link
-              href="/dashboard/activity"
-              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
-            >
-              Activity
-            </Link>
-            <Link
-              href="/dashboard/memory"
-              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
-            >
-              Memory
-            </Link>
-            <Link
-              href="/dashboard/settings"
-              className="text-[13px] font-medium text-ink-muted transition-colors hover:text-ink"
-            >
-              Settings
-            </Link>
-          </nav>
-          <UserButton
-            afterSignOutUrl="/"
-            appearance={{ elements: { userButtonAvatarBox: "h-8 w-8" } }}
-          />
-        </div>
-      </header>
-
-      {/* The board. Inbox on the left, the assistant in the middle with
-          the morning brief folded underneath it, calendar on the right —
-          the three-column arrangement from the design canvas. Below the
-          lg breakpoint it stacks, assistant first, since on a phone the
-          thing you came to do is talk to it. Either side panel can also
-          go full screen, which is state Board owns since it has to
-          reshape all three columns at once. */}
-      <Board />
-
-      {/* Tidying and filters have no home on the canvas board, so they
-          live behind a disclosure under it rather than competing with the
-          three panels for space. */}
-      <details className="group shrink-0 pb-6">
-        <summary className="nx-label cursor-pointer list-none text-center transition-colors hover:text-ink">
-          Inbox housekeeping
-        </summary>
-        <div className="flex flex-col items-center gap-4 pt-4">
-          <TriageSection />
-          <FiltersSection />
-        </div>
-      </details>
     </main>
   );
 }

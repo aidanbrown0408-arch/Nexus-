@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { briefToSpeech } from "@/lib/brief-speech";
+import { useSpeaker } from "./useSpeech";
 
 type Priority = {
   title: string;
@@ -117,6 +119,8 @@ function snapshotAge(fetchedAt: string): string | null {
 type Status =
   | { kind: "loading" }
   | { kind: "disconnected" }
+  // Google was connected and no longer is — a reconnect, not a retry.
+  | { kind: "expired" }
   | { kind: "error"; message: string }
   | { kind: "ready"; brief: Brief };
 
@@ -137,19 +141,63 @@ function formatGeneratedAt(iso: string): string {
     : at.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export default function BriefSection() {
+export default function BriefSection({
+  variant = "bar",
+  onOpenChange,
+}: {
+  // Lets the Home board rearrange itself when the brief opens (it keeps
+  // a slim assistant bar above it so you can still talk).
+  onOpenChange?: (open: boolean) => void;
+  // "bar" is the quiet strip under the assistant on the board. "page" is
+  // the Morning Brief tab, where the brief is the only thing on screen —
+  // so it opens already open, and the disclosure button goes away: there
+  // is nothing to collapse it back to.
+  variant?: "bar" | "page";
+} = {}) {
+  const page = variant === "page";
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [refreshing, setRefreshing] = useState(false);
   // Collapsed by default: the canvas gives the brief one quiet bar under
   // the assistant, and only opens it when asked, so the orb keeps the
   // middle of the screen.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(page);
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+
+  // Listening to the brief rather than reading it.
+  //
+  // The spoken version is assembled from the same object on screen (see
+  // lib/brief-speech.ts), so there is nothing to fetch and nothing that
+  // can disagree with the card. `prime` runs inside the click because
+  // iOS only grants audio the permission to play during a gesture.
+  const { speak, cancel: cancelSpeech, speaking, supported: canSpeak, prime } =
+    useSpeaker();
+
+  const toggleListen = useCallback(() => {
+    if (speaking) {
+      cancelSpeech();
+      return;
+    }
+    if (status.kind !== "ready") return;
+    prime();
+    speak(briefToSpeech(status.brief));
+  }, [speaking, status, prime, speak, cancelSpeech]);
+
+  // A brief left talking to an empty room. Collapsing the panel or
+  // leaving the page stops it — speechSynthesis and the audio element
+  // both outlive the component otherwise.
+  useEffect(() => cancelSpeech, [cancelSpeech]);
+  useEffect(() => {
+    if (!open) cancelSpeech();
+  }, [open, cancelSpeech]);
 
   // `regenerate` is the difference between "show me the brief" and "spend
   // a model call on a new one". The first is what a page load does; the
   // second only ever happens because the user asked.
   const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const hasBriefRef = useRef(false);
 
   const fetchBrief = useCallback(async (regenerate = false) => {
     setRefreshing(true);
@@ -169,8 +217,15 @@ export default function BriefSection() {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         if (body?.code === "not_connected") {
+          hasBriefRef.current = false;
           setGeneratedAt(null);
           setStatus({ kind: "disconnected" });
+          return;
+        }
+        if (body?.code === "reauth_required") {
+          hasBriefRef.current = false;
+          setGeneratedAt(null);
+          setStatus({ kind: "expired" });
           return;
         }
         throw new Error(body?.error ?? "Failed to load your brief");
@@ -180,6 +235,7 @@ export default function BriefSection() {
         generatedAt?: string;
       };
       setGeneratedAt(body.generatedAt ?? null);
+      hasBriefRef.current = true;
       setStatus({ kind: "ready", brief: body.brief });
     } catch (err) {
       const message =
@@ -187,14 +243,15 @@ export default function BriefSection() {
       // A rewrite that fails must not take the brief already on screen
       // with it. The old one is still true, still stored, and still
       // better than red text where a brief used to be.
-      setStatus((current) => {
-        if (current.kind === "ready") {
-          setRewriteError(message);
-          return current;
-        }
+      // Decided from a ref rather than inside a setStatus updater:
+      // updaters must be pure (React runs them twice in dev), and calling
+      // other setters from inside one is a side effect.
+      if (hasBriefRef.current) {
+        setRewriteError(message);
+      } else {
         setGeneratedAt(null);
-        return { kind: "error", message };
-      });
+        setStatus({ kind: "error", message });
+      }
     } finally {
       setRefreshing(false);
     }
@@ -212,53 +269,92 @@ export default function BriefSection() {
   return (
     <section
       className={
-        "w-full shrink-0 overflow-y-auto rounded-panel transition-colors " +
-        (open ? "border border-line bg-white p-5" : "bg-surface-muted p-4")
+        (page
+          ? "h-full w-full min-h-0 overflow-y-auto rounded-panel border border-line bg-white shadow-raised "
+          : `w-full ${open ? "min-h-0 flex-1" : "shrink-0"} overflow-y-auto rounded-panel border border-line bg-white shadow-raised transition-colors `) +
+        (open ? (page ? "p-6 lg:p-8" : "p-5") : "p-3.5 hover:border-accent-200")
       }
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center justify-center gap-3 text-ink"
+        hidden={page}
+        className="group flex w-full items-center gap-3.5 text-left text-ink"
       >
-        <span className="shrink-0 text-[17px] font-medium tracking-tight">
-          {open ? "Hide morning brief" : "View morning brief"}
+        <span
+          aria-hidden
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-amber-100 to-orange-100 text-orange-600"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />
+          </svg>
         </span>
-        <span className="nx-label min-w-0 truncate">
+        <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[15px] font-semibold tracking-tight">
+          {open ? "Hide morning brief" : "Your morning brief"}
+        </span>
+        <span className="min-w-0 truncate text-[13px] text-ink-ghost">
           {status.kind === "ready"
             ? "What needs you today"
             : status.kind === "loading"
               ? "Loading…"
               : status.kind === "disconnected"
                 ? "Not connected"
-                : "Unavailable"}
+                : status.kind === "expired"
+                  ? "Reconnect Google"
+                  : "Unavailable"}
           {generatedAt ? ` · ${formatGeneratedAt(generatedAt)}` : ""}
+        </span>
+        </span>
+        <span
+          aria-hidden
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-ghost transition-all group-hover:bg-surface-muted group-hover:text-ink ${open ? "rotate-180" : ""}`}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
         </span>
       </button>
 
       {open && (
       <>
-      <header className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <header
+        className={`flex flex-wrap items-center justify-between gap-3 ${
+          page ? "" : "mt-5"
+        }`}
+      >
         <p className="nx-label-lg">Today at a glance</p>
         <div className="flex items-center gap-2">
+          {status.kind === "ready" && canSpeak && (
+            <button
+              type="button"
+              onClick={toggleListen}
+              aria-pressed={speaking}
+              title="Reads the whole brief aloud — priorities, schedule, markets and headlines"
+              className="rounded-lg border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft"
+            >
+              {speaking ? "Stop" : "Listen"}
+            </button>
+          )}
           {status.kind === "ready" && (
             <button
               type="button"
               onClick={() => fetchBrief(true)}
               disabled={refreshing}
               title="Writes a new brief from your current mail, calendar and markets"
-              className="rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshing ? "Rewriting…" : "Rewrite"}
             </button>
           )}
-          {status.kind === "disconnected" && (
+          {(status.kind === "disconnected" || status.kind === "expired") && (
             <a
               href={connectHref}
-              className="rounded-full bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+              className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
             >
-              Connect Google
+              {status.kind === "expired" ? "Reconnect Google" : "Connect Google"}
             </a>
           )}
           {status.kind === "error" && (
@@ -266,7 +362,7 @@ export default function BriefSection() {
               type="button"
               onClick={() => fetchBrief(true)}
               disabled={refreshing}
-              className="rounded-full border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-line px-4 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshing ? "Retrying…" : "Retry"}
             </button>
@@ -280,6 +376,14 @@ export default function BriefSection() {
         {status.kind === "error" && (
           <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">
             {status.message}
+          </p>
+        )}
+
+        {status.kind === "expired" && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Your Google connection expired, so there was nothing to build
+            this morning&apos;s brief from. Reconnect and it&apos;ll write
+            itself again on the next load.
           </p>
         )}
 

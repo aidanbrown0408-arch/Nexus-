@@ -1,4 +1,3 @@
-import Link from "next/link";
 import ActivityList from "./ActivityList";
 
 export const dynamic = "force-dynamic";
@@ -15,17 +14,11 @@ export const dynamic = "force-dynamic";
 // scrolls away.
 export default function ActivityPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-12">
-      <Link
-        href="/dashboard"
-        className="nx-btn-quiet nx-btn-sm self-start"
-      >
-        ← Back to dashboard
-      </Link>
+    <main className="mx-auto flex w-full max-w-3xl flex-col px-4 pb-16 pt-10 sm:px-6">
 
-      <header className="mt-7">
+      <header className="border-b border-line pb-6">
         <p className="nx-label-lg">Action log</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+        <h1 className="mt-2 text-[28px] font-semibold tracking-tight text-ink">
           What Nexus has done
         </h1>
         <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-ink-muted">

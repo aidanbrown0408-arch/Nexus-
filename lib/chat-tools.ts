@@ -10,6 +10,7 @@ import {
 } from "./gmail";
 import { draftReply } from "./drafts";
 import { actionTarget, logAction, type ActionRecord } from "./actions";
+import { createTask, MAX_TITLE_LENGTH } from "./prep";
 import {
   hasScope,
   GMAIL_COMPOSE_SCOPE,
@@ -230,6 +231,40 @@ export const CHAT_TOOLS = [
       required: ["summary", "start", "end"],
     },
   },
+  {
+    name: "create_task",
+    description:
+      "Add something to the user's reminders list — a thing they need to " +
+      "do, with no meeting attached. Use this whenever they say 'remind " +
+      "me to…', 'add … to my list', 'I need to …', or mention a chore or " +
+      "errand they want kept track of. This is not a calendar event: it " +
+      "takes no time slot and nothing appears on their calendar, so " +
+      "prefer it over create_event for anything that's a task rather " +
+      "than an appointment. One call per task — if they list three " +
+      "things, call this three times.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        title: {
+          type: "string",
+          description:
+            "The task, in the user's own words and as short as they said " +
+            "it — 'call the dentist', 'renew the passport'. Not a " +
+            "sentence about the task.",
+        },
+        dueDate: {
+          type: "string",
+          description:
+            "When it's due, as a local date ('2026-09-18') or date-time " +
+            "('2026-09-18T15:00:00'). Resolve words like 'Friday' or " +
+            "'next week' against today's date, which you were given. " +
+            "Omit entirely if they didn't say when — an invented " +
+            "deadline is worse than none.",
+        },
+      },
+      required: ["title"],
+    },
+  },
 ];
 
 // Ids come from a model that was handed a list of them. It can still
@@ -303,6 +338,34 @@ async function pickCalendar(
   }
 
   return null;
+}
+
+// A date or date-time the model wrote in the user's local terms, turned
+// into an instant.
+//
+// A bare date becomes local noon rather than local midnight. Midnight
+// turned into an ISO instant lands on the previous day for anyone west of
+// UTC, which would file "due Friday" under Thursday — and a to-do list
+// that moves your deadlines a day earlier is worse than no list.
+function parseLocalDue(raw: string): { iso: string; label: string } | null {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+  const parsed = dateOnly
+    ? (() => {
+        const [y, m, d] = raw.split("-").map(Number);
+        return new Date(y, m - 1, d, 12, 0, 0, 0);
+      })()
+    : new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return {
+    iso: parsed.toISOString(),
+    label: parsed.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    }),
+  };
 }
 
 export async function runChatTool(
@@ -509,6 +572,54 @@ export async function runChatTool(
       });
       return {
         result: `Added "${summary}" to ${target.name}${repeatsSuffix}.`,
+        action,
+      };
+    }
+
+    if (name === "create_task") {
+      const title = String(input.title ?? "").trim();
+      if (!title) {
+        return { result: "A task needs a title." };
+      }
+
+      // Parsed here rather than trusted, and rejected rather than
+      // silently dropped. A model that produced "Friday" instead of a
+      // date has misunderstood something, and filing the task undated
+      // would hide that from both of us.
+      let dueAt: string | null = null;
+      let dueLabel = "";
+      if (typeof input.dueDate === "string" && input.dueDate.trim()) {
+        const parsed = parseLocalDue(input.dueDate.trim());
+        if (!parsed) {
+          return {
+            result:
+              "That due date didn't parse. Use a date like 2026-09-18, " +
+              "or leave it out.",
+          };
+        }
+        dueAt = parsed.iso;
+        dueLabel = parsed.label;
+      }
+
+      const item = await createTask(userId, {
+        title: title.slice(0, MAX_TITLE_LENGTH),
+        dueAt,
+        source: "chat",
+      });
+
+      const action = await logAction(userId, {
+        kind: "task_create",
+        summary: `Added "${item.title}" to your reminders${
+          dueLabel ? `, due ${dueLabel}` : ""
+        }`,
+        target: actionTarget.task(item.id),
+        undo: "delete_task",
+      });
+
+      return {
+        result: `Added "${item.title}" to their reminders${
+          dueLabel ? `, due ${dueLabel}` : " with no date"
+        }.`,
         action,
       };
     }
