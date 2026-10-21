@@ -16,8 +16,8 @@ settings and paperwork only you can do.
       You will need: a verified domain, the privacy policy URL
       (`/privacy`), terms URL (`/terms`), a demo video of each scope in use,
       and a written justification per scope.
-      *Worth considering:* dropping any scope you can live without shortens
-      the review.
+      Prepared answers, a demo-video script and a scope-reduction
+      suggestion are in `GOOGLE_VERIFICATION.md`.
 - [ ] **Vercel Pro.** Hobby is for non-commercial use only. Once on Pro,
       set `vercel.json`'s cron to `"0 * * * *"` and delete
       `.github/workflows/brief-cron.yml`.
