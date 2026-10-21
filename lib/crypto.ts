@@ -5,11 +5,12 @@ import {
   timingSafeEqual,
 } from "crypto";
 
-// Symmetric encryption for secrets we have to store and read back —
-// currently just the Apple app-specific password. Google tokens don't go
-// through here: they're OAuth tokens the user can revoke from Google's
-// side, and they expire. An Apple app-specific password does neither, so
-// it gets encrypted at rest rather than sitting in a column in plaintext.
+// Symmetric encryption for secrets we have to store and read back: the
+// Apple app-specific password, and Google OAuth tokens. A Google refresh
+// token is as good as the user's mailbox until they revoke it, and
+// Google's security assessment for restricted Gmail scopes expects it
+// encrypted at rest — so it gets the same treatment as the Apple
+// password rather than sitting in a column in plaintext.
 //
 // AES-256-GCM, so a tampered ciphertext fails to decrypt rather than
 // decrypting to garbage we'd then send to Apple.
@@ -21,11 +22,16 @@ const VERSION = "v1";
 
 // Accepts base64 or hex so it doesn't matter which one the user's key
 // generator spat out. Must decode to exactly 32 bytes either way.
+//
+// TOKEN_ENCRYPTION_KEY is the general name; APPLE_ENCRYPTION_KEY is
+// still honoured so an existing deployment keeps decrypting what it
+// already stored.
 function getKey(): Buffer {
-  const raw = process.env.APPLE_ENCRYPTION_KEY;
+  const raw =
+    process.env.TOKEN_ENCRYPTION_KEY || process.env.APPLE_ENCRYPTION_KEY;
   if (!raw) {
     throw new Error(
-      "APPLE_ENCRYPTION_KEY is not set. Generate one with: openssl rand -base64 32"
+      "TOKEN_ENCRYPTION_KEY is not set. Generate one with: openssl rand -base64 32"
     );
   }
 
@@ -38,7 +44,7 @@ function getKey(): Buffer {
   const key = candidates.find((b) => b.length === KEY_BYTES);
   if (!key) {
     throw new Error(
-      "APPLE_ENCRYPTION_KEY must decode to 32 bytes (base64 or hex). Generate one with: openssl rand -base64 32"
+      "TOKEN_ENCRYPTION_KEY must decode to 32 bytes (base64 or hex). Generate one with: openssl rand -base64 32"
     );
   }
   return key;
@@ -96,6 +102,24 @@ export function isEncryptionConfigured(): boolean {
   } catch {
     return false;
   }
+}
+
+// For columns that predate encryption. Writes are sealed whenever a key
+// is configured; reads accept either form, so rows stored in plaintext
+// keep working and are re-sealed the next time they're written (for a
+// Google token, the next hourly refresh).
+export function sealSecret(plaintext: string): string {
+  if (!plaintext || !isEncryptionConfigured()) return plaintext;
+  return encryptSecret(plaintext);
+}
+
+export function isSealed(stored: string): boolean {
+  return stored.startsWith(`${VERSION}:`);
+}
+
+export function openSecret(stored: string): string {
+  if (!stored || !isSealed(stored)) return stored;
+  return decryptSecret(stored);
 }
 
 // Constant-time compare, for anywhere we check a secret against a stored

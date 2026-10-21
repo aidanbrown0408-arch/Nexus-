@@ -1,7 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import type { ComponentProps } from "react";
 import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+
+type ClerkAppearance = NonNullable<
+  ComponentProps<typeof ClerkProvider>["appearance"]
+>;
 
 // Inter for everything; IBM Plex Mono only for times and technical bits.
 const sans = Inter({
@@ -19,6 +24,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: {
     default: "Nexus — An assistant you can just talk to",
     template: "%s · Nexus",
@@ -54,14 +60,17 @@ export const viewport: Viewport = {
 
 // Clerk's own UI is themed here so sign-in, sign-up and the user menu
 // match the rest of the app.
-const clerkAppearance = {
+// Typed against Clerk's own definition so a renamed variable fails the
+// build instead of silently falling back to Clerk's default theme (which
+// is what happened in the move to Clerk 7).
+const clerkAppearance: ClerkAppearance = {
   variables: {
     colorPrimary: "#155EEF",
-    colorText: "#101828",
-    colorTextSecondary: "#475467",
+    colorForeground: "#101828",
+    colorMutedForeground: "#475467",
     colorBackground: "#FFFFFF",
-    colorInputBackground: "#FFFFFF",
-    colorInputText: "#101828",
+    colorInput: "#FFFFFF",
+    colorInputForeground: "#101828",
     borderRadius: "8px",
     fontFamily: "var(--font-sans), system-ui, sans-serif",
   },
@@ -87,7 +96,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider appearance={clerkAppearance}>
+    <ClerkProvider appearance={clerkAppearance} afterSignOutUrl="/">
       <html lang="en" className={`${sans.variable} ${mono.variable}`}>
         <body className="font-sans">{children}</body>
       </html>

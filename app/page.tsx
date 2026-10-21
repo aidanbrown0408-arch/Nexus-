@@ -1,4 +1,4 @@
-import { SignInButton, SignedIn, SignedOut } from "@clerk/nextjs";
+import { SignInButton, Show } from "@clerk/nextjs";
 import Link from "next/link";
 import LandingPage from "./LandingPage";
 
@@ -11,44 +11,44 @@ export default function Home() {
     <LandingPage
       headerSignIn={
         <>
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button className="nx-btn-ghost nx-btn-sm">Sign in</button>
             </SignInButton>
-          </SignedOut>
+          </Show>
         </>
       }
       headerStart={
         <>
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button className="nx-btn-primary nx-btn-sm">Get started</button>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <Link href="/dashboard" className="nx-btn-primary nx-btn-sm">
               Go to dashboard
             </Link>
-          </SignedIn>
+          </Show>
         </>
       }
       heroPrimary={
         <>
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button className="nx-btn-ink px-6 py-3.5 text-[15px]">
                 Connect your Gmail
               </button>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <Link
               href="/dashboard"
               className="nx-btn-ink px-6 py-3.5 text-[15px]"
             >
               Open your dashboard
             </Link>
-          </SignedIn>
+          </Show>
         </>
       }
       heroSecondary={
@@ -58,21 +58,21 @@ export default function Home() {
       }
       closingCta={
         <>
-          <SignedOut>
+          <Show when="signed-out">
             <SignInButton mode="modal">
               <button className="nx-btn-ink px-7 py-3.5 text-[15px]">
                 Connect your Gmail
               </button>
             </SignInButton>
-          </SignedOut>
-          <SignedIn>
+          </Show>
+          <Show when="signed-in">
             <Link
               href="/dashboard"
               className="nx-btn-ink px-7 py-3.5 text-[15px]"
             >
               Open your dashboard
             </Link>
-          </SignedIn>
+          </Show>
         </>
       }
     />

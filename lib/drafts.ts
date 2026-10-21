@@ -1,4 +1,4 @@
-import { getAnthropicClient, DRAFT_MODEL } from "./anthropic";
+import { generateStructured, DRAFT_MODEL } from "./anthropic";
 import { nowLines, resolveTimezone } from "./clock";
 import { profileToDraftContext, type UserProfileRow } from "./profile";
 import type { EmailThread } from "./gmail";
@@ -126,17 +126,15 @@ export async function draftReply(
   instruction?: string,
   profile: UserProfileRow | null = null
 ): Promise<DraftedReply> {
-  const anthropic = getAnthropicClient();
-
   const trimmed = instruction?.trim().slice(0, MAX_INSTRUCTION_LENGTH);
   const timeZone = resolveTimezone(profile?.timezone);
 
-  const response = await anthropic.messages.create({
+  const output = await generateStructured({
     model: DRAFT_MODEL,
-    max_tokens: 2048,
+    // Covers thinking as well as the reply itself on Sonnet 5.5.
+    max_tokens: 8192,
     system: SYSTEM_PROMPT + profileToDraftContext(profile),
-    tools: [DRAFT_TOOL],
-    tool_choice: { type: "tool", name: "write_reply" },
+    schema: DRAFT_TOOL.input_schema,
     messages: [
       {
         role: "user",
@@ -163,15 +161,14 @@ export async function draftReply(
     ],
   });
 
-  const toolUse = response.content.find((block) => block.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use" || !isDraftResult(toolUse.input)) {
+  if (!isDraftResult(output)) {
     throw new Error("Claude did not return a reply matching the schema");
   }
 
-  const body = toolUse.input.body.trim().slice(0, MAX_BODY_CHARS);
+  const body = output.body.trim().slice(0, MAX_BODY_CHARS);
   if (!body) throw new Error("Claude returned an empty reply");
 
-  const note = toolUse.input.note?.trim();
+  const note = output.note?.trim();
 
   return { body, note: note || null };
 }

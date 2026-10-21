@@ -24,7 +24,7 @@ import { errorMessage } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 const MAX_SUMMARY = 200;
 const MAX_TEXT = 2000;
@@ -41,7 +41,8 @@ const MAX_TEXT = 2000;
 // The event is snapshotted before removal so the action log can restore
 // it. That restore brings the meeting back with a new id, not the old
 // one — the log's summary says as much.
-export async function DELETE(request: NextRequest, { params }: Context) {
+export async function DELETE(request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -267,7 +268,8 @@ export async function DELETE(request: NextRequest, { params }: Context) {
 // The target decides which service handles this, the same way create
 // does: the client sends `source` alongside whatever addresses the event
 // on that service, rather than Nexus guessing from the shape of an id.
-export async function PATCH(request: NextRequest, { params }: Context) {
+export async function PATCH(request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

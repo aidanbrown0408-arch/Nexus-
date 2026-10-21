@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Orb, { type OrbMode } from "../Orb";
 import { speakableText } from "@/lib/speech-text";
@@ -62,7 +63,7 @@ function Glyph({
   size?: number;
   className?: string;
 }) {
-  const paths: Record<string, JSX.Element> = {
+  const paths: Record<string, React.JSX.Element> = {
     mic: (
       <>
         <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -373,6 +374,8 @@ function Composer({ autoFocus = false }: { autoFocus?: boolean }) {
       <textarea
         ref={ref}
         rows={1}
+        // Matches the server's per-message cap in app/api/chat/route.ts.
+        maxLength={8000}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {

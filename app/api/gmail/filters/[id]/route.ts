@@ -8,12 +8,13 @@ import { errorMessage } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 // Turn a rule off. Applies to future mail only — anything already
 // trashed stays trashed, and the sweep that moved it has its own undo in
 // the action log. Saying so plainly beats implying this is a full revert.
-export async function DELETE(_request: NextRequest, { params }: Context) {
+export async function DELETE(_request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

@@ -41,11 +41,11 @@ export async function POST(request: Request) {
   }
 
   if (!isEncryptionConfigured()) {
-    console.error("Apple connect attempted without APPLE_ENCRYPTION_KEY set");
+    console.error("Apple connect attempted without TOKEN_ENCRYPTION_KEY (or APPLE_ENCRYPTION_KEY) set");
     return NextResponse.json(
       {
         error:
-          "Apple Calendar isn't configured on the server yet. Set APPLE_ENCRYPTION_KEY.",
+          "Apple Calendar isn't available right now.",
         code: "not_configured",
       },
       { status: 500 }

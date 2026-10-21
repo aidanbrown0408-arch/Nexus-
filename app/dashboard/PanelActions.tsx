@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 // Small icon buttons for panel headers (refresh, full screen, collapse).
 // Replacing the old row of text links keeps each header to one clean
 // line; every button still carries a label for screen readers and a
@@ -15,7 +16,7 @@ type IconName =
   | "sparkles"
   | "x";
 
-const PATHS: Record<IconName, JSX.Element> = {
+const PATHS: Record<IconName, React.JSX.Element> = {
   refresh: (
     <>
       <path d="M20 11a8 8 0 0 0-14.6-4.5L4 8" />

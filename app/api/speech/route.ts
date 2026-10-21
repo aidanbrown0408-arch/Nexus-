@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { synthesizeSpeech, speechProvider, MAX_SPEECH_CHARS } from "@/lib/tts";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!(await allowRequest(userId, "speech"))) return rateLimitedResponse();
 
   if (!speechProvider()) {
     return NextResponse.json(

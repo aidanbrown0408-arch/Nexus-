@@ -11,6 +11,7 @@ import { draftReply, MAX_INSTRUCTION_LENGTH } from "@/lib/drafts";
 import { getProfile, type UserProfileRow } from "@/lib/profile";
 import { actionTarget, logAction } from "@/lib/actions";
 import { errorMessage } from "@/lib/supabase";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!(await allowRequest(userId, "draft"))) return rateLimitedResponse();
 
   let messageId: string;
   let instruction: string | undefined;

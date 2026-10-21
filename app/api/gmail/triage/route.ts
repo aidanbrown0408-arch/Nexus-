@@ -9,6 +9,7 @@ import { fetchInboxMessages, listLabels } from "@/lib/gmail";
 import { proposeArchive } from "@/lib/triage";
 import { getProfile, type UserProfileRow } from "@/lib/profile";
 import { errorMessage } from "@/lib/supabase";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ export async function GET() {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!(await allowRequest(userId, "triage"))) return rateLimitedResponse();
 
   try {
     const client = await getAuthorizedClientForUser(userId);

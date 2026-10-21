@@ -29,7 +29,7 @@ import { errorMessage } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 // Undo one logged action.
 //
@@ -37,7 +37,8 @@ type Context = { params: { id: string } };
 // to be worked out here, so adding archive or label later means adding a
 // case below and nothing else. An action whose undo is "none" was never
 // reversible and says so plainly instead of failing halfway.
-export async function POST(_request: NextRequest, { params }: Context) {
+export async function POST(_request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

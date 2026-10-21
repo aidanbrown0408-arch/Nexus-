@@ -8,6 +8,7 @@ import {
   rejectDangerousCriteria,
 } from "@/lib/filter-parse";
 import { errorMessage } from "@/lib/supabase";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!(await allowRequest(userId, "filter"))) return rateLimitedResponse();
 
   let description: string | undefined;
   let criteria: FilterCriteria | undefined;

@@ -7,7 +7,7 @@ import {
   missingScopes,
   OAUTH_STATE_COOKIE,
 } from "@/lib/google";
-import { secretsMatch } from "@/lib/crypto";
+import { openSecret, sealSecret, secretsMatch } from "@/lib/crypto";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -91,8 +91,12 @@ export async function GET(req: NextRequest) {
     const { error } = await supabase.from("google_tokens").upsert(
       {
         user_id: userId,
-        access_token: tokens.access_token ?? "",
-        refresh_token: tokens.refresh_token ?? existing?.refresh_token ?? null,
+        access_token: sealSecret(tokens.access_token ?? ""),
+        refresh_token: tokens.refresh_token
+          ? sealSecret(tokens.refresh_token)
+          : existing?.refresh_token
+            ? sealSecret(openSecret(existing.refresh_token))
+            : null,
         token_expiry: tokens.expiry_date
           ? new Date(tokens.expiry_date).toISOString()
           : null,

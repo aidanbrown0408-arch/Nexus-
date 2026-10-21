@@ -6,7 +6,7 @@ import { fetchRecentMessages } from "@/lib/gmail";
 import { gatherEvents } from "@/lib/calendar-sources";
 import { listPrepItems } from "@/lib/prep";
 import type { EventSummary } from "@/lib/events";
-import { getAnthropicClient, BRIEF_MODEL } from "@/lib/anthropic";
+import { generateStructured, BRIEF_MODEL } from "@/lib/anthropic";
 import { errorMessage } from "@/lib/supabase";
 import { dayKey, nowLines, resolveTimezone } from "@/lib/clock";
 import {
@@ -165,7 +165,7 @@ const MAX_SITUATION_CHARS = 1600;
 // for Claude to choose from — leaving it out entirely (rather than always
 // present but empty) means a user who didn't ask for news doesn't even
 // give the model the opportunity to invent something there.
-function buildBriefTool(newsCount: number) {
+export function buildBriefTool(newsCount: number) {
   const includeNews = newsCount > 0;
   return {
     name: "write_brief",
@@ -810,17 +810,16 @@ export async function generateBrief(
   // a generation failure is a smaller problem than a fetch failure and the UI
   // should be able to say "retry" rather than "something broke".
   try {
-    const anthropic = getAnthropicClient();
-    const response = await anthropic.messages.create({
+    const output = await generateStructured({
       model: BRIEF_MODEL,
-      max_tokens: 4096,
-      output_config: { effort: "low" },
+      // Covers thinking as well as the brief on Sonnet 5.5.
+      max_tokens: 8192,
+      effort: "low",
       system:
         SYSTEM_PROMPT +
         profileToPromptContext(profile) +
         factsToPromptContext(remembered),
-      tools: [buildBriefTool(narrowedArticles.length)],
-      tool_choice: { type: "tool", name: "write_brief" },
+      schema: buildBriefTool(narrowedArticles.length).input_schema,
       messages: [
         {
           role: "user",
@@ -891,17 +890,16 @@ export async function generateBrief(
       ],
     });
 
-    const toolUse = response.content.find((block) => block.type === "tool_use");
-    if (!toolUse || toolUse.type !== "tool_use" || !isBrief(toolUse.input)) {
+    if (!isBrief(output)) {
       throw new Error("Claude did not return a brief matching the schema");
     }
 
-    // Rebuilt field by field rather than spread from toolUse.input — raw
+    // Rebuilt field by field rather than spread from output — raw
     // model output could contain a newsHighlights entry that didn't
     // survive the match-against-fetched-articles check in
     // resolveNewsHighlights, and a spread would let it leak through
     // before that check ever ran.
-    const rawHighlights = (toolUse.input as Record<string, unknown>)
+    const rawHighlights = (output as Record<string, unknown>)
       .newsHighlights;
     const newsHighlights = resolveNewsHighlights(
       rawHighlights,
@@ -911,7 +909,7 @@ export async function generateBrief(
     // Only kept when there was source material behind it. A `situation`
     // written with no articles in hand is the exact failure the rest of
     // this file is built to prevent.
-    const rawSituation = (toolUse.input as Record<string, unknown>).situation;
+    const rawSituation = (output as Record<string, unknown>).situation;
     const situation =
       narrowedArticles.length && typeof rawSituation === "string"
         ? rawSituation.trim().slice(0, MAX_SITUATION_CHARS)
@@ -931,7 +929,7 @@ export async function generateBrief(
     // Notes, checked before they're kept: a citation to something the
     // model wasn't shown is dropped, and so is a fact already in memory.
     const learned = sanitizeExtractedFacts(
-      (toolUse.input as Record<string, unknown>).facts,
+      (output as Record<string, unknown>).facts,
       {
         sources: factSources,
         existing: knownFacts.map((fact) => normalizeFact(fact.fact)),
@@ -948,10 +946,10 @@ export async function generateBrief(
     void pruneExpiredFacts(userId);
 
     const brief: Brief = {
-      greeting: toolUse.input.greeting,
-      headline: toolUse.input.headline,
-      priorities: toolUse.input.priorities.slice(0, 5),
-      scheduleNote: toolUse.input.scheduleNote,
+      greeting: output.greeting,
+      headline: output.headline,
+      priorities: output.priorities.slice(0, 5),
+      scheduleNote: output.scheduleNote,
       ...(calendarUnavailable ? { calendarUnavailable: true } : {}),
       ...(mailUnavailable ? { mailUnavailable: true } : {}),
       ...(newsHighlights.length ? { newsHighlights } : {}),

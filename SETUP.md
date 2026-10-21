@@ -71,7 +71,7 @@ alter table public.apple_credentials enable row level security;
 ```
 
 `app_password` holds ciphertext, not the password — it's encrypted with
-`APPLE_ENCRYPTION_KEY` (step 3) before it ever reaches Supabase.
+`TOKEN_ENCRYPTION_KEY` (step 3) before it ever reaches Supabase.
 
 ### 1a-quater. Event prep checklists
 
@@ -284,6 +284,19 @@ alter table public.user_facts enable row level security;
 Rows are deleted, never flagged. "Every fact is visible and deletable"
 means nothing if forgetting leaves the row behind.
 
+### 1a-decies. Launch hardening (migration 003)
+
+Run `migrations/003-launch-hardening.sql` in the SQL editor. It is
+idempotent. It:
+
+- turns on row-level security for `brief_cache` and `brief_deliveries`,
+  which were created without it (every other table already had it). In
+  Supabase, a `public` table without RLS is reachable through the
+  project's anon key, and `brief_cache` holds summaries of users' email.
+- creates `rate_limits` and the `nexus_rate_limit_hit()` function behind
+  the per-user limits in `lib/rate-limit.ts`. Until it is applied the
+  limiter fails open and logs that it is not limiting anything.
+
 ### 1b. Grab the environment variables
 
 In Supabase → **Project Settings** → **API**, copy:
@@ -373,8 +386,8 @@ GOOGLE_CLIENT_ID=...                  # from step 2d
 GOOGLE_CLIENT_SECRET=...              # from step 2d
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/google/callback
 
-# Apple Calendar
-APPLE_ENCRYPTION_KEY=...               # openssl rand -base64 32
+# Encrypts Google tokens and iCloud passwords at rest
+TOKEN_ENCRYPTION_KEY=...               # openssl rand -base64 32
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -418,9 +431,17 @@ user can't end up seeing a headline that was never real.
 the OAuth client exactly, path included. Google rejects the connect flow
 with `redirect_uri_mismatch` otherwise.
 
-`APPLE_ENCRYPTION_KEY` must decode to 32 bytes — base64 or hex both work.
-Generate it once and keep it: rotating it makes every stored Apple
-password unreadable, and everyone connected has to enter a new one.
+`TOKEN_ENCRYPTION_KEY` must decode to 32 bytes — base64 or hex both work.
+Generate it once and keep it: rotating it makes every stored Google token
+and Apple password unreadable, and everyone connected has to reconnect.
+It encrypts Google OAuth tokens as well as iCloud passwords; Google
+tokens stored before encryption was added are read as plaintext and
+re-sealed on their next refresh.
+
+**Upgrading an existing deployment:** `APPLE_ENCRYPTION_KEY` is still
+read as a fallback. Either keep it and don't set `TOKEN_ENCRYPTION_KEY`,
+or set `TOKEN_ENCRYPTION_KEY` to the **same** value — a new value would
+make stored iCloud passwords unreadable.
 
 Restart the dev server after editing `.env.local`.
 
@@ -979,37 +1000,23 @@ yourself.
 
 ### 6d. Deploying the schedule
 
-> **The schedule in `vercel.json` and the schedule this code assumes do
-> not currently match.** `vercel.json` says `"0 12 * * *"` — once a day
-> at 12:00 UTC. `lib/schedule.ts` only returns a delivery window within
-> `GRACE_HOURS` (3) of a user's chosen `morning_time`, which assumes
-> this route is invoked **hourly**.
->
-> With a once-daily run, the only users ever served are those whose
-> morning falls in the 09:00–12:00 UTC band. A New York user who chose
-> 9am (13:00 UTC) and a Tokyo user who chose 7am (22:00 UTC previous
-> day) are skipped on every run, silently and permanently.
->
-> Two ways out, and they are a plan decision rather than a code one:
->
-> - **Hourly cron** — change the schedule to `"0 * * * *"`. This is what
->   the code is built for. Vercel's Hobby plan caps cron invocations at
->   one per day, so this needs Pro.
-> - **External hourly pinger** — leave Vercel's cron off (or daily) and
->   hit the same URL hourly from GitHub Actions, cron-job.org, or any
->   scheduler, with the `Authorization: Bearer $CRON_SECRET` header. The
->   route is idempotent per user per day, so an extra call costs nothing.
->
-> Until one of those is in place, the cron logs `notDue` on every run and
-> returns it in the response body — if that number is large and `due` is
-> a small unchanging set, this is why.
+`vercel.json` declares the cron as `"0 * * * *"` — **hourly**, which is
+what `lib/schedule.ts` assumes: it only opens a delivery window within
+`GRACE_HOURS` (3) of each user's chosen `morning_time`, in their own
+timezone. Vercel reads it on deploy; there is nothing to configure in the
+dashboard.
 
-`vercel.json` declares the cron. Vercel reads it on deploy; there
-is nothing to configure in the dashboard. On the Hobby plan cron runs are
-once-daily and the timing is approximate, so an hourly schedule needs a
-Pro plan — on Hobby, either accept one fixed hour for everyone or point
-an external scheduler (GitHub Actions, cron-job.org) at the same URL with
-the same Bearer token.
+Hourly cron needs Vercel **Pro**. (Pro is required for a commercial
+launch anyway — the Hobby plan is for personal, non-commercial use.) If
+you stay on Hobby, Vercel will reject an hourly schedule: set it back to
+once a day and point an external scheduler (GitHub Actions,
+cron-job.org) at the same URL hourly with the
+`Authorization: Bearer $CRON_SECRET` header. The route is idempotent per
+user per day, so an extra call costs nothing.
+
+If the schedule is ever less than hourly, the cron logs `notDue` on every
+run and returns it in the response body — a large `notDue` with a small,
+unchanging `due` means most users are being skipped.
 
 ### 6e. Testing it without waiting for morning
 

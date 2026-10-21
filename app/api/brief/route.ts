@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { generateBrief, type BriefResult } from "@/lib/brief";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,11 @@ export async function GET(request: NextRequest) {
   }
 
   const forceRefresh = request.nextUrl.searchParams.get("refresh") === "1";
+  // Only a rewrite is limited: a plain read is served from the day's
+  // cache, and generates at most once a day per user.
+  if (forceRefresh && !(await allowRequest(userId, "brief"))) {
+    return rateLimitedResponse();
+  }
   // Read and rewrite are keyed apart: a rewrite arriving while a read is
   // in flight should do its own work, not inherit the read's answer.
   const key = `${userId}:${forceRefresh ? "rewrite" : "read"}`;

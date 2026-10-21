@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -15,7 +16,7 @@ import { VIEWS, parseView, viewHref, type View } from "./views";
 // same bar sits on all of them: the dashboard views on the left, the
 // account pages on the right, and the current one always highlighted.
 
-const ICONS: Record<View | "activity" | "memory" | "settings", JSX.Element> = {
+const ICONS: Record<View | "activity" | "memory" | "settings", React.JSX.Element> = {
   board: (
     <path d="M4 5h6v14H4zM14 5h6v6h-6zM14 15h6v4h-6z" />
   ),

@@ -1,4 +1,4 @@
-import { getAnthropicClient, FILTER_MODEL } from "./anthropic";
+import { generateStructured, FILTER_MODEL } from "./anthropic";
 import type { FilterCriteria } from "./filters";
 
 // Turning "bin the Medium newsletters" into Gmail filter criteria.
@@ -155,15 +155,13 @@ export function rejectDangerousCriteria(
 export async function parseFilterDescription(
   description: string
 ): Promise<ParsedFilter> {
-  const anthropic = getAnthropicClient();
   const trimmed = description.trim().slice(0, MAX_DESCRIPTION_LENGTH);
 
-  const response = await anthropic.messages.create({
+  const output = await generateStructured({
     model: FILTER_MODEL,
-    max_tokens: 1024,
+    max_tokens: 4096,
     system: SYSTEM_PROMPT,
-    tools: [FILTER_TOOL],
-    tool_choice: { type: "tool", name: "write_filter_criteria" },
+    schema: FILTER_TOOL.input_schema,
     messages: [
       {
         role: "user",
@@ -177,12 +175,11 @@ export async function parseFilterDescription(
     ],
   });
 
-  const toolUse = response.content.find((block) => block.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use" || !isToolInput(toolUse.input)) {
+  if (!isToolInput(output)) {
     throw new Error("Claude did not return filter criteria matching the schema");
   }
 
-  const input = toolUse.input;
+  const input = output;
   const criteria: FilterCriteria = {
     from: input.from?.trim() || undefined,
     to: input.to?.trim() || undefined,

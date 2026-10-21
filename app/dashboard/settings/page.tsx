@@ -1,4 +1,5 @@
 import ProfileSettingsForm from "./ProfileSettingsForm";
+import DeleteAccount from "./DeleteAccount";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,6 @@ export const dynamic = "force-dynamic";
 export default function ProfileSettingsPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col px-4 pb-16 pt-10 sm:px-6">
-
       <header className="border-b border-line pb-6">
         <p className="nx-label-lg">Profile</p>
         <h1 className="mt-2 text-[28px] font-semibold tracking-tight text-ink">
@@ -24,6 +24,7 @@ export default function ProfileSettingsPage() {
       </header>
 
       <ProfileSettingsForm />
+      <DeleteAccount />
     </main>
   );
 }

@@ -15,7 +15,6 @@ export default function DashboardLayout({
 }) {
   const account = (
     <UserButton
-      afterSignOutUrl="/"
       appearance={{ elements: { userButtonAvatarBox: "h-9 w-9" } }}
     />
   );

@@ -1,4 +1,4 @@
-import { getAnthropicClient, TRIAGE_MODEL } from "./anthropic";
+import { generateStructured, TRIAGE_MODEL } from "./anthropic";
 import { nowLines, resolveTimezone } from "./clock";
 import {
   hasVips,
@@ -132,8 +132,6 @@ export async function proposeArchive(
   profile: UserProfileRow | null = null
 ): Promise<TriageResult> {
   if (!messages.length) return { proposals: [], vipProtected: 0 };
-
-  const anthropic = getAnthropicClient();
   const timeZone = resolveTimezone(profile?.timezone);
   const vips = vipTerms(profile);
   const protectingVips = hasVips(vips);
@@ -160,12 +158,12 @@ export async function proposeArchive(
       rules.map((rule) => `- ${rule}`).join("\n")
     : "";
 
-  const response = await anthropic.messages.create({
+  const output = await generateStructured({
     model: TRIAGE_MODEL,
-    max_tokens: 4096,
+    // Covers thinking as well as the proposals on Sonnet 5.5.
+    max_tokens: 8192,
     system: SYSTEM_PROMPT + profileRules + profileToPromptContext(profile),
-    tools: [TRIAGE_TOOL],
-    tool_choice: { type: "tool", name: "propose_archive" },
+    schema: TRIAGE_TOOL.input_schema,
     messages: [
       {
         role: "user",
@@ -197,8 +195,7 @@ export async function proposeArchive(
     ],
   });
 
-  const toolUse = response.content.find((block) => block.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use" || !isTriageResult(toolUse.input)) {
+  if (!isTriageResult(output)) {
     throw new Error("Claude did not return a triage list matching the schema");
   }
 
@@ -210,7 +207,7 @@ export async function proposeArchive(
   const proposals: TriageProposal[] = [];
   let vipProtected = 0;
 
-  for (const pick of toolUse.input.archive) {
+  for (const pick of output.archive) {
     const message = byId.get(pick.id);
     if (!message || seen.has(pick.id)) continue;
     seen.add(pick.id);

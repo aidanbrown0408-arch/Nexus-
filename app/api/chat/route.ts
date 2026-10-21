@@ -20,6 +20,7 @@ import {
 import { recallFacts, factsToPromptContext } from "@/lib/memory";
 import { nowLines, resolveTimezone } from "@/lib/clock";
 import { errorMessage } from "@/lib/supabase";
+import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ const SNIPPET_CHARS = 300;
 // context, which a month of events doesn't strain.
 const CALENDAR_DAYS = 30;
 const MAX_HISTORY = 20;
+// Per message. Generous for anything typed or dictated; the point is that
+// a pasted novel (or a script) can't turn one request into a large bill.
+const MAX_MESSAGE_CHARS = 8_000;
 
 // How many times the model may act before it has to answer.
 //
@@ -159,6 +163,7 @@ function parseMessages(value: unknown): ChatMessage[] | null {
     const m = entry as Record<string, unknown>;
     if (m.role !== "user" && m.role !== "assistant") return null;
     if (typeof m.content !== "string") return null;
+    if (m.content.length > MAX_MESSAGE_CHARS) return null;
     messages.push({ role: m.role, content: m.content });
   }
   return messages;
@@ -169,6 +174,7 @@ export async function POST(req: NextRequest) {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!(await allowRequest(userId, "chat"))) return rateLimitedResponse();
 
   const raw = await req.json().catch(() => null);
   const parsed = parseMessages(raw);
@@ -176,7 +182,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Invalid request body. Expected { messages: [{ role: 'user' | 'assistant', content: string }] } with at least one message.",
+          "Invalid request body. Expected { messages: [{ role: 'user' | 'assistant', content: string }] } with at least one message, " +
+          `each under ${MAX_MESSAGE_CHARS} characters.`,
       },
       { status: 400 }
     );
@@ -184,7 +191,18 @@ export async function POST(req: NextRequest) {
 
   // Keep only the tail of a long conversation. The oldest turns are the
   // least likely to matter and the most expensive to keep re-sending.
+  //
+  // The tail has to start on a user turn, and the conversation has to end
+  // on one: the API rejects a history that opens with the assistant, and
+  // this model doesn't accept a trailing assistant message (prefill).
   const history = parsed.slice(-MAX_HISTORY);
+  while (history.length && history[0].role !== "user") history.shift();
+  if (!history.length || history[history.length - 1].role !== "user") {
+    return NextResponse.json(
+      { error: "The last message must be from the user." },
+      { status: 400 }
+    );
+  }
 
   // The same profile the brief reads. Without it, chat answers "what
   // matters today?" generically while the brief directly above it names
@@ -362,14 +380,20 @@ export async function POST(req: NextRequest) {
     let content = "";
 
     for (let pass = 0; pass <= MAX_TOOL_PASSES; pass += 1) {
-      // On the final pass the tools are withheld, which forces an
+      // On the final pass tool use is switched off, which forces an
       // answer instead of another action. Passing them every time meant
       // the budget could only be spent by cutting the model off
       // mid-sentence — after the mailbox had already been changed.
+      //
+      // The tool definitions stay on the request even then: the
+      // conversation already holds tool_use and tool_result blocks, and
+      // the API rejects a request that carries those without the tools
+      // they refer to.
       const lastPass = pass === MAX_TOOL_PASSES;
       const response = await anthropic.messages.create({
         model: CHAT_MODEL,
-        max_tokens: 4096,
+        // Covers thinking as well as the reply on Sonnet 5.5.
+        max_tokens: 8192,
         output_config: { effort: "low" },
         system: lastPass
           ? systemPrompt +
@@ -377,7 +401,8 @@ export async function POST(req: NextRequest) {
             "attempt anything further — tell the user what you did and " +
             "what is left."
           : systemPrompt,
-        ...(lastPass ? {} : { tools: CHAT_TOOLS }),
+        tools: CHAT_TOOLS,
+        ...(lastPass ? { tool_choice: { type: "none" as const } } : {}),
         messages: conversation,
       });
 
@@ -394,7 +419,7 @@ export async function POST(req: NextRequest) {
       if (!toolUses.length) break;
 
       if (lastPass) {
-        // Unreachable: no tools were offered on this pass.
+        // Unreachable: tool use was switched off on this pass.
         console.error("[chat] tool use returned with no tools offered");
         break;
       }

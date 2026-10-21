@@ -3,7 +3,7 @@ import {
   type PrepItemRow,
   type PrepSource,
 } from "./supabase";
-import { getAnthropicClient, PREP_MODEL } from "./anthropic";
+import { generateStructured, PREP_MODEL } from "./anthropic";
 import { nowLines, resolveTimezone } from "./clock";
 import {
   getProfile,
@@ -433,16 +433,14 @@ export async function draftPrepTitles(
   relatedEmails: RelatedEmail[],
   profile: UserProfileRow | null = null
 ): Promise<string[]> {
-  const anthropic = getAnthropicClient();
   const timeZone = resolveTimezone(profile?.timezone);
 
-  const response = await anthropic.messages.create({
+  const output = await generateStructured({
     model: PREP_MODEL,
-    max_tokens: 2048,
-    output_config: { effort: "low" },
+    max_tokens: 4096,
+    effort: "low",
     system: SYSTEM_PROMPT + profileToPromptContext(profile),
-    tools: [PREP_TOOL],
-    tool_choice: { type: "tool", name: "write_prep_list" },
+    schema: PREP_TOOL.input_schema,
     messages: [
       {
         role: "user",
@@ -478,13 +476,12 @@ export async function draftPrepTitles(
     ],
   });
 
-  const toolUse = response.content.find((block) => block.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use" || !isPrepList(toolUse.input)) {
+  if (!isPrepList(output)) {
     throw new Error("Claude did not return a prep list matching the schema");
   }
 
   const seen = new Set<string>();
-  return toolUse.input.items
+  return output.items
     .map((title) => title.trim())
     .filter((title) => {
       if (!title) return false;

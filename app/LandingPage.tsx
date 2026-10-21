@@ -1,4 +1,6 @@
+import Link from "next/link";
 import Logo from "./Logo";
+import { SITE } from "@/lib/site";
 import Orb from "./Orb";
 
 // The public landing page, as pure presentation.
@@ -234,8 +236,20 @@ export default function LandingPage({
             </p>
           </div>
           <nav aria-label="Footer" className="flex items-center gap-7 text-[13.5px]">
+            <Link
+              href="/privacy"
+              className="text-ink-muted transition-colors hover:text-ink"
+            >
+              Privacy
+            </Link>
+            <Link
+              href="/terms"
+              className="text-ink-muted transition-colors hover:text-ink"
+            >
+              Terms
+            </Link>
             <a
-              href="mailto:hello@nexus.app"
+              href={`mailto:${SITE.contactEmail}`}
               className="text-ink-muted transition-colors hover:text-ink"
             >
               Contact

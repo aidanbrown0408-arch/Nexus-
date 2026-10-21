@@ -6,13 +6,14 @@ import { errorMessage } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 // Tick an item off, rename it, or move its due date. Both write paths
 // in lib/prep filter on
 // the Clerk user id as well as the row id — an id guessed from another
 // account matches nothing rather than updating it.
-export async function PATCH(request: NextRequest, { params }: Context) {
+export async function PATCH(request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -69,7 +70,8 @@ export async function PATCH(request: NextRequest, { params }: Context) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: Context) {
+export async function DELETE(_request: NextRequest, context: Context) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

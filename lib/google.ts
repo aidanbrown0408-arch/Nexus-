@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import { getSupabaseAdmin, type GoogleTokenRow } from "./supabase";
+import { isEncryptionConfigured, isSealed, openSecret, sealSecret } from "./crypto";
 
 // The httpOnly cookie that carries the OAuth `state` nonce between the
 // connect redirect and the callback. See app/api/google/connect/route.ts
@@ -160,6 +161,29 @@ export function googleFailureResponse(
   return { body: { error: fallback }, status: 500 };
 }
 
+// Withdraw the grant at Google's end, for disconnect and account
+// deletion. Revoking either token revokes the whole grant; the refresh
+// token is preferred because it outlives the access token. Never throws —
+// a grant Google already considers dead is the outcome we wanted anyway.
+export async function revokeGoogleAccess(userId: string): Promise<void> {
+  try {
+    const { data } = await getSupabaseAdmin()
+      .from("google_tokens")
+      .select("access_token, refresh_token")
+      .eq("user_id", userId)
+      .maybeSingle<{ access_token: string; refresh_token: string | null }>();
+    if (!data) return;
+    const token = openSecret(data.refresh_token || data.access_token);
+    if (!token) return;
+    await getOAuthClient().revokeToken(token);
+  } catch (err) {
+    console.warn(
+      `Google revoke failed for ${userId}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 export function getOAuthClient(): OAuth2Client {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -190,10 +214,17 @@ export async function getAuthorizedClientForUser(
   if (error) throw error;
   if (!data) return null;
 
+  // Stored sealed (see lib/crypto.ts). Compared and written back below
+  // in plaintext form, so decrypt once here.
+  const storedAccess = openSecret(data.access_token);
+  const storedRefresh = data.refresh_token ? openSecret(data.refresh_token) : null;
+  const needsSealing =
+    isEncryptionConfigured() && !isSealed(data.access_token);
+
   const client = getOAuthClient();
   client.setCredentials({
-    access_token: data.access_token,
-    refresh_token: data.refresh_token ?? undefined,
+    access_token: storedAccess,
+    refresh_token: storedRefresh ?? undefined,
     expiry_date: data.token_expiry
       ? new Date(data.token_expiry).getTime()
       : undefined,
@@ -206,7 +237,7 @@ export async function getAuthorizedClientForUser(
   // now rather than letting the first API call fail as a mystery 401.
   const expired =
     !data.token_expiry || new Date(data.token_expiry).getTime() <= Date.now();
-  if (!data.refresh_token && expired) {
+  if (!storedRefresh && expired) {
     throw new GoogleAuthError(
       "no_refresh_token",
       "Google didn't give Nexus a refresh token, so the connection " +
@@ -244,12 +275,18 @@ export async function getAuthorizedClientForUser(
     client.setCredentials({ ...credentials, scope: data.scope });
   }
 
-  if (credentials.access_token && credentials.access_token !== data.access_token) {
+  if (
+    credentials.access_token &&
+    (credentials.access_token !== storedAccess || needsSealing)
+  ) {
     const update: Partial<GoogleTokenRow> = {
       updated_at: new Date().toISOString(),
-      access_token: credentials.access_token,
+      access_token: sealSecret(credentials.access_token),
     };
-    if (credentials.refresh_token) update.refresh_token = credentials.refresh_token;
+    // A refresh usually comes back without a refresh token. A row still
+    // in plaintext gets its existing one sealed on the way through.
+    const refresh = credentials.refresh_token ?? storedRefresh;
+    if (refresh) update.refresh_token = sealSecret(refresh);
     if (credentials.expiry_date)
       update.token_expiry = new Date(credentials.expiry_date).toISOString();
     // Only ever widened from a real grant — never nulled out by a

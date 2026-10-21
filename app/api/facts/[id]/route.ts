@@ -16,8 +16,9 @@ export const dynamic = "force-dynamic";
 // can only ever touch this user's rows beats two that could drift apart.
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
+  const params = await context.params;
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

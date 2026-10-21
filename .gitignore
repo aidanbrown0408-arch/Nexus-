@@ -37,3 +37,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local backups and scratch
+/.backups/
+/.ui-backup/
+/nexus-src.tgz
