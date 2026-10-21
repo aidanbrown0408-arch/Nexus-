@@ -4,13 +4,15 @@
 -- (your project → SQL Editor → New query → paste → Run).
 -- Safe to run twice: every statement is idempotent.
 
--- 1. Row-level security on the two tables that were created without it.
+-- 1. Row-level security on the two tables SETUP.md creates without it.
 --
---    Every other table here already has RLS on with no policies, so only
---    the service role (the server) can reach it. brief_cache and
---    brief_deliveries were missed. In Supabase, a table in `public`
---    without RLS is readable and writable through the project's anon
---    key, and brief_cache holds summaries of people's email.
+--    Every other table here has RLS on with no policies, so only the
+--    service role (the server) can reach it. SETUP.md's statements for
+--    brief_cache and brief_deliveries didn't enable it. (Newer Supabase
+--    projects turn it on by default, so it may already be on — this
+--    makes sure.) A `public` table without RLS is readable and writable
+--    through the project's anon key, and brief_cache holds summaries of
+--    people's email.
 alter table if exists public.brief_cache enable row level security;
 alter table if exists public.brief_deliveries enable row level security;
 
@@ -59,3 +61,4 @@ end;
 $$;
 
 revoke all on function public.nexus_rate_limit_hit(text, text, integer, integer) from public, anon, authenticated;
+grant execute on function public.nexus_rate_limit_hit(text, text, integer, integer) to service_role;
