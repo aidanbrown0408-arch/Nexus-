@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     type: "website",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "Nexus — An assistant you can just talk to",
     description:
       "One morning brief, edit-in-place actions, and voice or text — the same assistant either way.",
