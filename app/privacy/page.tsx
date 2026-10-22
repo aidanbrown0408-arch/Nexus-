@@ -41,6 +41,12 @@ export default function PrivacyPage() {
           suggest guests and recognize people who matter to you.
         </li>
         <li>
+          <strong>Your voice</strong> — when you talk to Nexus, your browser turns
+          speech into text (Chrome and Edge do this through their own speech
+          service); Nexus receives only the text, never audio. Replies read
+          aloud are generated as AI speech.
+        </li>
+        <li>
           <strong>What you tell us</strong> — your onboarding answers, preferences,
           reminders, and chat messages, and short notes Nexus remembers about
           your work (which you can view and delete under Memory).
