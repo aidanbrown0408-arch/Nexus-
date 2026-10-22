@@ -91,7 +91,9 @@ settings and paperwork only you can do.
 - Voice: natural default voice (cedar), per-person voice choice with
   preview, warm conversational delivery, fewer seams, a more human spoken
   brief, automatic fallback before OpenAI's 2027-01-06 TTS shutdown, and
-  the AI-voice disclosure OpenAI requires. `npm run voice:samples`.
+  the AI-voice disclosure OpenAI requires. `npm run voice:samples`;
+  all four samples, including the fallback engine, checked by ear on
+  2026-10-21.
 - Google permissions narrowed from four restricted Gmail scopes to two
   (`gmail.modify`, `gmail.settings.basic`). In Google Cloud's consent
   screen, remove `gmail.readonly` and `gmail.compose` from the scope list.
@@ -103,8 +105,6 @@ settings and paperwork only you can do.
 
 ## Known follow-ups (not blocking)
 
-- Hosted-voice fallback (gpt-audio-mini) has not been heard yet — run
-  `npm run voice:samples` before January 2027.
 - Contact email in `lib/site.ts` is a placeholder (`hello@nexus.app`).
 - An unused `emails` table exists in Supabase; account deletion doesn't
   touch it. Decide whether to drop it.
