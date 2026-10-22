@@ -51,14 +51,26 @@ type Target = {
 // early evening onwards in the Americas returns *tomorrow* — so opening
 // "New event" at 9pm pre-filled the next day while the time field,
 // built from `toTimeString()`, stayed local. The two disagreed by a day.
-function defaultDate(): string {
-  return toDayKey(new Date());
-}
-
-function defaultTime(offsetHours: number): string {
-  const d = new Date();
-  d.setHours(d.getHours() + offsetHours, 0, 0, 0);
-  return d.toTimeString().slice(0, 5);
+// The next full hour, for an hour. The date comes from the start rather
+// than from "today", and the end never wraps past midnight: at 10pm the
+// old defaults were 11pm–12am on the same date (rejected as ending before
+// it starts), and after 11pm they were midnight of the day just begun.
+function defaultSlot(now: Date = new Date()): {
+  date: string;
+  start: string;
+  end: string;
+} {
+  const start = new Date(now);
+  start.setHours(start.getHours() + 1, 0, 0, 0);
+  const end = new Date(start);
+  end.setHours(end.getHours() + 1);
+  const hhmm = (d: Date) => d.toTimeString().slice(0, 5);
+  const sameDay = toDayKey(end) === toDayKey(start);
+  return {
+    date: toDayKey(start),
+    start: hhmm(start),
+    end: sameDay ? hhmm(end) : "23:59",
+  };
 }
 
 export default function AddEventForm({
@@ -71,9 +83,9 @@ export default function AddEventForm({
   initialAllDay,
 }: Props) {
   const [summary, setSummary] = useState("");
-  const [date, setDate] = useState(defaultDate);
-  const [startTime, setStartTime] = useState(() => defaultTime(1));
-  const [endTime, setEndTime] = useState(() => defaultTime(2));
+  const [date, setDate] = useState(() => defaultSlot().date);
+  const [startTime, setStartTime] = useState(() => defaultSlot().start);
+  const [endTime, setEndTime] = useState(() => defaultSlot().end);
   const [allDay, setAllDay] = useState(false);
   const [location, setLocation] = useState("");
   const [guests, setGuests] = useState<Guest[]>([]);
@@ -116,10 +128,11 @@ export default function AddEventForm({
     setRecurrence(null);
     setError(null);
     setNeedsReconnect(false);
-    setDate(initialDate ?? defaultDate());
+    const slot = defaultSlot();
+    setDate(initialDate ?? slot.date);
     setAllDay(initialAllDay ?? false);
-    setStartTime(initialStartTime ?? defaultTime(1));
-    setEndTime(initialEndTime ?? defaultTime(2));
+    setStartTime(initialStartTime ?? slot.start);
+    setEndTime(initialEndTime ?? slot.end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 

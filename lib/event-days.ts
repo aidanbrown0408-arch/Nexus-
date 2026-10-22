@@ -32,6 +32,32 @@ export function parseDayKey(key: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// A bare all-day date read straight back as YYYY-MM-DD, and anything
+// else as the local day it falls on. The edit form used `new Date(iso)`
+// for both, which put every all-day event one day early west of UTC.
+export function toLocalDateInput(iso: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso.slice(0, 10) : toDayKey(d);
+}
+
+// How many days an all-day event covers, from the exclusive end date
+// Google and iCalendar both use (a one-day event on the 14th ends on the
+// 15th). Never less than one, so a malformed end can't make it vanish.
+export function allDaySpan(start: string, endExclusive: string): number {
+  const a = parseDayKey(start);
+  const b = parseDayKey(endExclusive);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 1;
+  // Rounded, because a day across a DST change is 23 or 25 hours.
+  const days = Math.round((b.getTime() - a.getTime()) / 86_400_000);
+  return Math.min(Math.max(days, 1), MAX_SPAN_DAYS);
+}
+
+/** A YYYY-MM-DD key moved by whole days. */
+export function shiftDayKey(key: string, days: number): string {
+  return toDayKey(addDays(parseDayKey(key), days));
+}
+
 export function startOfDay(d: Date): Date {
   const copy = new Date(d);
   copy.setHours(0, 0, 0, 0);

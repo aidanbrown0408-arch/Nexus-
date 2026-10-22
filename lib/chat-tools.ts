@@ -176,7 +176,10 @@ export const CHAT_TOOLS = [
         },
         end: {
           type: "string",
-          description: "End of the first occurrence, same format as start.",
+          description:
+            "End of the first occurrence, same format as start. For an " +
+            "all-day event, the last day it covers — the same date as " +
+            "start for a one-day event.",
         },
         allDay: {
           type: "boolean",

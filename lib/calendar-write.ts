@@ -119,6 +119,22 @@ function toEventDate(value: string, allDay: boolean) {
   return { dateTime: new Date(value).toISOString() };
 }
 
+// Callers (the event forms, the chat tool) give an all-day event's end
+// as the last day it covers — the same date as the start for a one-day
+// event, which is what any date picker produces. Google wants the day
+// *after* (exclusive end), and treats start == end as an empty range.
+// Converted here, at the one place that talks to Google, so every caller
+// means the same thing by `end` as it does for iCloud (lib/apple.ts).
+// The restore path is the exception: it replays Google's own stored,
+// already-exclusive dates and calls toEventDate directly.
+export function allDayEnd(start: string, end: string): { date: string } {
+  const first = start.slice(0, 10);
+  const last = end.slice(0, 10) < first ? first : end.slice(0, 10);
+  const d = new Date(`${last}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return { date: d.toISOString().slice(0, 10) };
+}
+
 export async function createEvent(
   client: OAuth2Client,
   event: NewEvent
@@ -142,7 +158,9 @@ export async function createEvent(
       location: event.location || undefined,
       description: event.description || undefined,
       start: toEventDate(event.start, event.allDay),
-      end: toEventDate(event.end, event.allDay),
+      end: event.allDay
+        ? allDayEnd(event.start, event.end)
+        : toEventDate(event.end, event.allDay),
       attendees: attendees.length ? attendees : undefined,
       // The start/end above describe the first occurrence; the rule says
       // when it happens again. Google expands the series itself, so
@@ -199,7 +217,9 @@ export async function updateEvent(
       location: edit.location || undefined,
       description: edit.description || undefined,
       start: toEventDate(edit.start, edit.allDay),
-      end: toEventDate(edit.end, edit.allDay),
+      end: edit.allDay
+        ? allDayEnd(edit.start, edit.end)
+        : toEventDate(edit.end, edit.allDay),
     },
   });
 

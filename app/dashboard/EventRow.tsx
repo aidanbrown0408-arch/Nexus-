@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { EventSummary } from "@/lib/events";
 import type { CalendarColor } from "./calendarColors";
 import type { PrepItem } from "@/lib/prep";
+import { allDaySpan, shiftDayKey, toLocalDateInput } from "@/lib/event-days";
 
 // One event, plus the short list of things that have to happen before
 // it. Collapsed, the row says how ready you are; expanded, it's an
@@ -70,12 +71,7 @@ function formatTimeRange(event: EventSummary): string {
 
 // Local date/time strings for the edit form's inputs — always the
 // browser's own zone, the same convention AddEventForm uses.
-function toDateInput(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+const toDateInput = toLocalDateInput;
 
 function toTimeInput(iso: string): string {
   const d = new Date(iso);
@@ -176,8 +172,17 @@ export default function EventRow({
     setSaving(true);
     setEditError(null);
 
+    // An all-day event keeps however many days it already covered: the
+    // form only has one date, and sending that as the end too squashed a
+    // three-day trip into one when all you changed was its title. The
+    // API takes the last day inclusive; what's stored locally mirrors
+    // Google's exclusive end so the grids read it the same way.
+    const span = event.allDay ? allDaySpan(event.start, event.end) : 1;
     const start = editAllDay ? editDate : `${editDate}T${editStartTime}`;
-    const end = editAllDay ? editDate : `${editDate}T${editEndTime}`;
+    const end = editAllDay
+      ? shiftDayKey(editDate, span - 1)
+      : `${editDate}T${editEndTime}`;
+    const storedEnd = editAllDay ? shiftDayKey(editDate, span) : end;
 
     try {
       const body: Record<string, unknown> = {
@@ -205,7 +210,7 @@ export default function EventRow({
       onUpdated(event.key, {
         summary: editSummary.trim(),
         start,
-        end,
+        end: storedEnd,
         allDay: editAllDay,
         location: editLocation.trim() || null,
       });
