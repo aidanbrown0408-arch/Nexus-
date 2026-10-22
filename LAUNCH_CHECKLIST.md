@@ -7,8 +7,8 @@ settings and paperwork only you can do.
 ## 1. Blockers — the app can't go public without these
 
 - [ ] **Google OAuth verification.** Nexus asks for Gmail scopes Google
-      classes as *restricted* (`gmail.readonly`, `gmail.modify`,
-      `gmail.compose`, `gmail.settings.basic`), plus sensitive Calendar and
+      classes as *restricted* (`gmail.modify` and `gmail.settings.basic` —
+      narrowed from four in October 2026), plus sensitive Calendar and
       Contacts scopes. Until the app is verified it is capped at 100 test
       users and shows an "unverified app" warning. Restricted scopes also
       require an annual third-party security assessment (CASA) through a

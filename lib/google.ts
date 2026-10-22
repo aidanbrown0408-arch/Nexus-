@@ -8,23 +8,28 @@ import { isEncryptionConfigured, isSealed, openSecret, sealSecret } from "./cryp
 // for why the state is a random nonce rather than the user id.
 export const OAUTH_STATE_COOKIE = "nexus_google_oauth_state";
 
+// No longer requested: gmail.modify covers reading. Kept so a grant made
+// before October 2026 can still be recognised.
 export const GMAIL_READONLY_SCOPE =
   "https://www.googleapis.com/auth/gmail.readonly";
 export const CALENDAR_READONLY_SCOPE =
   "https://www.googleapis.com/auth/calendar.readonly";
-// Creates and updates drafts. Deliberately not gmail.send: a draft that
-// can't be sent without the user opening Gmail is the whole safety
-// argument for shipping this action first. Widening it later is a
-// decision, not an oversight.
+// No longer requested: gmail.modify also creates drafts, so this was a
+// second restricted scope for Google to review with nothing to show for
+// it. Kept to recognise grants made before October 2026.
 export const GMAIL_COMPOSE_SCOPE =
   "https://www.googleapis.com/auth/gmail.compose";
 // Creates the native Gmail filters that route incoming mail. Settings
 // only — it can't read or move a single message on its own.
 export const GMAIL_SETTINGS_SCOPE =
   "https://www.googleapis.com/auth/gmail.settings.basic";
-// Moves existing mail to Trash when sweeping a backlog. Still not
-// gmail.delete: everything Nexus removes lands in Trash, where Gmail
-// keeps it for 30 days and the undo route can put it back.
+// Reads mail, writes drafts, archives, labels and moves to Trash — every
+// Gmail call Nexus makes except filters. Google's own description of it
+// includes sending; Nexus never sends because there is no send call
+// anywhere in the code, not because the scope forbids it. Still not
+// mail.google.com (full access): it can't permanently delete, so
+// everything Nexus removes lands in Trash, where Gmail keeps it for 30
+// days and undo can put it back.
 export const GMAIL_MODIFY_SCOPE =
   "https://www.googleapis.com/auth/gmail.modify";
 // Creating and deleting calendar events. The first scope that lets Nexus
@@ -45,16 +50,27 @@ export const OTHER_CONTACTS_SCOPE =
 // Every Google scope the app asks for at connect time. One consent
 // covers all of them, so new APIs get appended here rather than getting
 // a connect flow of their own.
+//
+// Kept to the minimum, because each restricted Gmail scope is one more
+// thing Google's verification has to approve. Two restricted scopes:
+// gmail.modify and gmail.settings.basic.
 export const GOOGLE_SCOPES = [
-  GMAIL_READONLY_SCOPE,
   CALENDAR_READONLY_SCOPE,
-  GMAIL_COMPOSE_SCOPE,
   GMAIL_SETTINGS_SCOPE,
   GMAIL_MODIFY_SCOPE,
   CALENDAR_EVENTS_SCOPE,
   CONTACTS_SCOPE,
   OTHER_CONTACTS_SCOPE,
 ];
+
+// Whether this grant can create drafts. New connections get gmail.modify;
+// ones made before October 2026 may only have gmail.compose for it.
+export function canDraft(storedScope: string | null | undefined): boolean {
+  return (
+    hasScope(storedScope, GMAIL_MODIFY_SCOPE) ||
+    hasScope(storedScope, GMAIL_COMPOSE_SCOPE)
+  );
+}
 
 // Whether a stored scope string covers a given scope. Google returns
 // the granted scopes space-separated, so match on exact members rather

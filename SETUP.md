@@ -326,21 +326,23 @@ project or create a new one (top-left project dropdown → **New project**).
 - App name: `Nexus` (anything you like), user support email, developer
   contact email. Save & continue.
 - **Scopes**: click **Add or remove scopes** and add:
-  - `https://www.googleapis.com/auth/gmail.readonly`
   - `https://www.googleapis.com/auth/calendar.readonly`
-  - `https://www.googleapis.com/auth/gmail.compose`
   - `https://www.googleapis.com/auth/gmail.settings.basic`
   - `https://www.googleapis.com/auth/gmail.modify`
   - `https://www.googleapis.com/auth/calendar.events`
   - `https://www.googleapis.com/auth/contacts.readonly`
   - `https://www.googleapis.com/auth/contacts.other.readonly`
 
-  `gmail.compose` lets Nexus create drafts. It deliberately does **not**
-  include `gmail.send` — a draft that can't leave your account without
-  you opening Gmail is the entire safety argument for this feature.
+  `gmail.modify` covers everything Nexus does with mail: reading it,
+  writing drafts, archiving, labelling and moving to Trash. (Until
+  October 2026 the app also asked for `gmail.readonly` and
+  `gmail.compose`; both are covered by `gmail.modify`, and dropping them
+  leaves two restricted scopes for Google to review instead of four.)
+  Google's description of `gmail.modify` includes sending — Nexus never
+  sends because the code has no send call, and every reply is left in
+  Drafts for you.
 
-  `gmail.settings.basic` creates filters; `gmail.modify` moves existing
-  mail to Trash when you sweep a backlog. Neither is `gmail.delete`, and
+  `gmail.settings.basic` creates filters. Neither is `gmail.delete`, and
   there is no code path in this app that permanently deletes a message —
   everything Nexus removes lands in Trash, where Gmail holds it for 30
   days.

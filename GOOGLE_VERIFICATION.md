@@ -1,6 +1,6 @@
 # Google OAuth verification — prepared answers
 
-Nexus requests four **restricted** Gmail scopes, so Google requires (1) brand
+Nexus requests two **restricted** Gmail scopes, so Google requires (1) brand
 and scope verification and (2) an annual third-party security assessment
 (CASA) before the app can leave "Testing" (capped at 100 users, with an
 "unverified app" screen). Submit from Google Cloud Console → Google Auth
@@ -17,35 +17,27 @@ Platform → Data Access / Verification Center.
       Clerk's "Development mode").
 - [ ] A demo video (unlisted YouTube) — see the script below.
 
-## Consider requesting fewer scopes first
+## Scopes requested
 
-Google asks for "the most narrowly focused scope possible", and every
-restricted scope is something the reviewer must agree you need.
-`gmail.modify` already covers reading mail (and, per Google's description,
-composing), so `gmail.readonly` and probably `gmail.compose` are redundant
-alongside it. Dropping them would shorten the review and remove "send email"
-from the consent screen — which matters for an app whose pitch is that it
-never sends. This is a code change in `lib/google.ts` (`GOOGLE_SCOPES`) plus
-testing that drafts still work with `gmail.modify` alone; existing users
-would not need to reconnect, since their grants are wider.
+Two restricted Gmail scopes (`gmail.modify`, `gmail.settings.basic`) and
+four sensitive ones (`calendar.readonly`, `calendar.events`,
+`contacts.readonly`, `contacts.other.readonly`). The app asked for
+`gmail.readonly` and `gmail.compose` too until October 2026; both are
+covered by `gmail.modify` and were dropped to shorten the review.
 
 ## Scope justifications (paste per scope)
 
-**gmail.readonly** — Nexus reads the user's recent inbox to write a morning
-brief summarizing what needs their attention, to answer questions the user
-asks about their mail in chat, to show a message in the in-app reading pane,
-and to find email related to an upcoming meeting when preparing a checklist.
-Message content is sent to our AI provider only to produce the response the
-user asked for, and is not stored except for the day's brief summary.
-
-**gmail.compose** — When the user clicks "Draft reply" or asks in chat for a
-reply, Nexus writes the reply into the user's Gmail Drafts folder so they can
-review, edit and send it themselves. Nexus never sends email.
-
-**gmail.modify** — On the user's request (a button in the app, or a chat
-instruction the user confirms), Nexus archives messages, applies labels, or
-moves messages to Trash. Each change is logged in the user's Activity page
-with an Undo. Nexus never permanently deletes mail.
+**gmail.modify** — Nexus reads the user's recent inbox to write a morning
+brief, to answer questions the user asks about their mail in chat, to show
+a message in the in-app reading pane, and to find email related to an
+upcoming meeting. When the user clicks "Draft reply" or asks for a reply in
+chat, it writes the reply into their Gmail Drafts folder for them to review
+and send themselves — Nexus has no send function. On the user's request (a
+button, or a chat instruction they confirm) it archives messages, applies
+labels, or moves messages to Trash; every change is logged on the user's
+Activity page with an Undo, and nothing is permanently deleted. Message
+content is sent to our AI provider only to produce the response the user
+asked for, and is not stored beyond the day's brief summary.
 
 **gmail.settings.basic** — Users can describe a filter in plain English
 ("archive newsletters from Substack"); Nexus shows the parsed rule for review
@@ -75,7 +67,7 @@ visible and the OAuth client ID shown on the consent screen.
 2. Show the Google consent screen (expand "App info" to show the client ID).
 3. Morning brief → shows mail and calendar being read (readonly scopes).
 4. Open an email → Draft reply → open Gmail Drafts to show the draft
-   (compose).
+   (modify).
 5. Tidy up → archive two newsletters → show them archived in Gmail → Undo
    (modify).
 6. Filters → "archive newsletters from Substack" → confirm → show the filter

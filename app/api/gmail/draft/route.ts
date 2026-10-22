@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getAuthorizedClientForUser, hasScope, GMAIL_COMPOSE_SCOPE } from "@/lib/google";
+import { getAuthorizedClientForUser, canDraft } from "@/lib/google";
 import {
   createReplyDraft,
   fetchOwnEmail,
@@ -64,11 +64,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // gmail.compose arrived after gmail.readonly, so anyone who connected
-    // before this feature has a token that can read mail but not write a
+    // A grant from before drafts existed can read mail but not write a
     // draft. Checking up front turns a 403 from Google into a prompt the
-    // UI can act on.
-    if (!hasScope(client.credentials.scope, GMAIL_COMPOSE_SCOPE)) {
+    // UI can act on. (canDraft accepts gmail.modify or the older
+    // gmail.compose.)
+    if (!canDraft(client.credentials.scope)) {
       return NextResponse.json(
         {
           error: "Nexus needs permission to create drafts in your Gmail.",

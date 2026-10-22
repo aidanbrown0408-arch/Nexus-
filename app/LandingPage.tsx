@@ -17,9 +17,9 @@ import Orb from "./Orb";
 // your mail — everything reads your mail — it is that every change it
 // makes is reversible and written down, and that the permissions it asks
 // for stop deliberately short of the dangerous ones. That is a real
-// property of this codebase (lib/google.ts asks for gmail.compose and
-// pointedly not gmail.send; lib/actions.ts logs every write with its own
-// undo), so the page is built around it. The hero shows the product's
+// property of this codebase (there is no send call anywhere — Nexus only
+// writes drafts; lib/actions.ts logs every write with its own undo), so
+// the page is built around it. The hero shows the product's
 // actual output rather than an abstraction, and the one loud moment on
 // the page is the band that lays out what Nexus can and cannot do.
 

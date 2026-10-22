@@ -13,7 +13,7 @@ import { actionTarget, logAction, type ActionRecord } from "./actions";
 import { createTask, MAX_TITLE_LENGTH } from "./prep";
 import {
   hasScope,
-  GMAIL_COMPOSE_SCOPE,
+  canDraft,
   GMAIL_MODIFY_SCOPE,
   CALENDAR_EVENTS_SCOPE,
 } from "./google";
@@ -385,7 +385,7 @@ export async function runChatTool(
       if (!visibleIds.has(messageId)) {
         return { result: "No such message in the list you were given." };
       }
-      if (!hasScope(client.credentials.scope, GMAIL_COMPOSE_SCOPE)) {
+      if (!canDraft(client.credentials.scope)) {
         return {
           result:
             "Nexus doesn't have permission to create drafts yet — the " +
