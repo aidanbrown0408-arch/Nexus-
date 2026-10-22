@@ -1176,6 +1176,34 @@ and rough elsewhere, and there's no fixing that for free. `speak(text)`
 is deliberately its own small surface so swapping in a hosted voice later
 is one file rather than a rewrite.
 
+### The hosted voice (October 2026)
+
+With `OPENAI_API_KEY` set, replies and the brief are read by an OpenAI
+neural voice instead of the browser's (`lib/tts.ts`). What makes it sound
+like a person rather than a system voice:
+
+- **The voice.** Default `cedar`; each person can pick another in
+  Settings → Voice (stored per device). OpenAI recommends `cedar` and
+  `marin` as its most natural voices.
+- **The delivery note.** It asks for a warm, relaxed, conversational read.
+  The previous note asked for "no warmth… no smile in the voice", which
+  is exactly the flat delivery people heard as robotic.
+- **Fewer seams.** Long reads are split so the first sentence plays fast,
+  but later pieces are up to 1,000 characters for the hosted voice (600
+  for the browser's), and each piece is told whether more follows so it
+  doesn't wind down at every seam.
+- **The script.** The spoken brief no longer appends "from your email" to
+  every item, and headlines are read as "Reuters reports: …".
+
+**Shutdown on 2027-01-06.** OpenAI deprecated `gpt-4o-mini-tts`. When a
+request to it fails, `lib/tts.ts` retries with `gpt-audio-mini` through
+Chat Completions, which is told to read the text verbatim; if its
+transcript doesn't match the text, the browser voice is used instead.
+`npm run voice:samples` renders both engines so you can check by ear.
+
+OpenAI's usage policy requires telling users the voice is AI-generated;
+Settings and the speaker button both say so.
+
 ## 9. The activity page
 
 `/dashboard/activity` — everything Nexus has changed on the account,

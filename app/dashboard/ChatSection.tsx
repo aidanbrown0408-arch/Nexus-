@@ -928,7 +928,11 @@ export default function ChatSection({
         <div className="flex shrink-0 items-center gap-1">
           {speaker.supported && (
             <IconButton
-              label={voiceReplies ? "Reading replies aloud — turn off" : "Read replies aloud"}
+              label={
+                voiceReplies
+                  ? "Reading replies aloud in an AI voice — turn off"
+                  : "Read replies aloud (AI-generated voice)"
+              }
               onClick={toggleVoiceReplies}
               active={voiceReplies}
             >

@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { chunkForSpeech } from "@/lib/speech-text";
+import {
+  chunkForSpeech,
+  FIRST_CHUNK_CHARS,
+  HOSTED_CHUNK_CHARS,
+} from "@/lib/speech-text";
 
 // Voice.
 //
@@ -234,24 +238,31 @@ const PITCH = 0.95;
 // OS, browser and locale, and a missing name should cost a point, not
 // break the picker.
 const PREFERRED_VOICES = [
-  // macOS / iOS male voices, best first.
+  // macOS / iOS male voices, best first. The downloadable "Premium"
+  // voices are by far the most natural thing a browser can offer.
+  "Evan (Premium)",
+  "Nathan (Premium)",
   "Tom (Premium)",
+  "Jamie (Premium)",
   "Evan (Enhanced)",
+  "Nathan (Enhanced)",
   "Daniel",
   "Alex",
   "Tom",
   // Chrome's own, on every platform.
   "Google UK English Male",
   // Windows.
-  "Microsoft Guy Online (Natural)",
   "Microsoft Andrew Online (Natural)",
+  "Microsoft Brian Online (Natural)",
+  "Microsoft Guy Online (Natural)",
   "Microsoft Davis Online (Natural)",
   "Microsoft David",
 ];
 
 // Names that mark the thin, clipped end of the range — the actual source
 // of the complaint that a web app "sounds like Siri".
-const AVOID = /compact|espeak|novelty|eloquence|whisper|zarvox|trinoids|bells/i;
+const AVOID =
+  /compact|espeak|novelty|eloquence|whisper|zarvox|trinoids|bells|bahh|boing|bubbles|cellos|jester|organ|superstar|wobble|good news|bad news|albert|fred|junior|ralph/i;
 
 export function scoreVoice(voice: SpeechSynthesisVoice): number {
   const name = voice.name ?? "";
@@ -286,6 +297,10 @@ export function scoreVoice(voice: SpeechSynthesisVoice): number {
 // stays the default — this is an override, not a required setup step.
 
 export const STORED_VOICE_KEY = "nexus.voice";
+// The hosted (OpenAI) voice. Unlike the browser voice this isn't tied to
+// the machine, but it's kept beside it so both choices live in one place
+// and need no database change. Empty means the server's default.
+export const HOSTED_VOICE_KEY = "nexus.hostedVoice";
 // Same-tab notification. `storage` only fires in *other* tabs, so the
 // settings page picking a voice wouldn't reach a speaker in the same one.
 const VOICE_CHANGED = "nexus:voicechanged";
@@ -309,6 +324,33 @@ export function setStoredVoiceName(name: string | null): void {
     /* the choice lasts this page load, which is better than an error */
   }
   window.dispatchEvent(new Event(VOICE_CHANGED));
+}
+
+export function storedHostedVoice(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(HOSTED_VOICE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredHostedVoice(id: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (id) window.localStorage.setItem(HOSTED_VOICE_KEY, id);
+    else window.localStorage.removeItem(HOSTED_VOICE_KEY);
+  } catch {
+    /* lasts this page load */
+  }
+}
+
+type ChunkPosition = "only" | "first" | "middle" | "last";
+
+function positionOf(index: number, count: number): ChunkPosition {
+  if (count <= 1) return "only";
+  if (index === 0) return "first";
+  return index === count - 1 ? "last" : "middle";
 }
 
 /** English voices, best first — the order the picker lists them in. */
@@ -481,22 +523,31 @@ export function useSpeaker(): Speaker {
 
   // One chunk of audio, from the route. Throws on anything but audio,
   // which is how the caller knows to fall back.
-  const synthesize = useCallback(async (chunk: string): Promise<string> => {
-    const res = await fetch("/api/speech", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({ text: chunk }),
-    });
+  const synthesize = useCallback(
+    async (chunk: string, position: ChunkPosition): Promise<string> => {
+      const res = await fetch("/api/speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        // The position lets the voice carry its intonation across a seam
+        // instead of winding down at the end of every piece.
+        body: JSON.stringify({
+          text: chunk,
+          position,
+          voice: storedHostedVoice(),
+        }),
+      });
 
-    // 501 is "no key configured", which is a normal install and a
-    // permanent answer — stop asking for the rest of the session.
-    if (res.status === 501) hostedRef.current = false;
-    if (!res.ok) throw new Error(String(res.status));
-    hostedRef.current = true;
+      // 501 is "no key configured", which is a normal install and a
+      // permanent answer — stop asking for the rest of the session.
+      if (res.status === 501) hostedRef.current = false;
+      if (!res.ok) throw new Error(String(res.status));
+      hostedRef.current = true;
 
-    return URL.createObjectURL(await res.blob());
-  }, []);
+      return URL.createObjectURL(await res.blob());
+    },
+    []
+  );
 
   // Play one object URL through to its end. Resolves either way — a
   // piece that won't play is a gap, not a reason to stop the brief.
@@ -548,13 +599,18 @@ export function useSpeaker(): Speaker {
       // reads as broken. So: a short first piece, played the moment it
       // lands, with the next one already being made behind it. What the
       // user waits for is one sentence, not the whole brief.
-      const chunks = chunkForSpeech(trimmed);
+      const chunks = chunkForSpeech(
+        trimmed,
+        FIRST_CHUNK_CHARS,
+        HOSTED_CHUNK_CHARS
+      );
+      const count = chunks.length;
 
       void (async () => {
         // Kept out of the loop's way so a rejection can never surface as
         // an unhandled one while an earlier piece is still playing.
         let ahead: Promise<string | null> | null = chunks.length
-          ? synthesize(chunks[0]).catch(() => null)
+          ? synthesize(chunks[0], positionOf(0, count)).catch(() => null)
           : null;
 
         for (let i = 0; i < chunks.length; i += 1) {
@@ -562,7 +618,9 @@ export function useSpeaker(): Speaker {
           // Start the next one now, so it is made during this one.
           ahead =
             i + 1 < chunks.length
-              ? synthesize(chunks[i + 1]).catch(() => null)
+              ? synthesize(chunks[i + 1], positionOf(i + 1, count)).catch(
+                  () => null
+                )
               : null;
 
           const url = await current;

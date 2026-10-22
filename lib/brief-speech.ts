@@ -1,4 +1,4 @@
-import type { Brief, NewsHighlight } from "./brief";
+import type { Brief } from "./brief";
 import { speakableText } from "./speech-text";
 
 // The brief, said out loud.
@@ -35,18 +35,11 @@ import { speakableText } from "./speech-text";
 // Pure, and in lib/, for the reason the test config gives: the parts of
 // the voice feature worth testing are the ones with no browser in them.
 
-const SOURCE_PHRASE: Record<string, string> = {
-  email: "from your email",
-  calendar: "from your calendar",
-  both: "from your email and your calendar",
-};
-
-const NEWS_CATEGORY_PHRASE: Record<NewsHighlight["category"], string> = {
-  financial: "markets",
-  industry: "industry",
-  us: "U.S.",
-  world: "world",
-};
+// Where each item came from (email, calendar) is shown on the card and
+// left out of the read. Said after every item — "from your email" — it
+// was the single most robotic thing about the spoken brief: a person
+// briefing you doesn't cite the inbox each time, the reason already
+// makes it obvious.
 
 // A different-sounding brief every morning, without a model call and
 // without a coin flip. The variant is chosen from the brief's own text,
@@ -122,33 +115,30 @@ function pairUp(clauses: string[], joiner: string): string[] {
 // Headlines are too long to pair — two of them in one sentence is a
 // clause nobody can hold. They get a connector each instead, which is
 // the difference between a list being recited and one being told.
-const NEWS_CONNECTORS = ["Also,", "Then,", "Elsewhere,", "Separately,"] as const;
+const NEWS_CONNECTORS = ["Also,", "Meanwhile,", "And", "Elsewhere,"] as const;
 
 const OPENERS = ["Good morning.", "Morning.", "Right — good morning."] as const;
 
 // Ordinals are how a document numbers a list. These are how someone
 // talks through one.
-const FIRST_STEP = [
-  "Top of the list,",
-  "First thing,",
-  "Starting with the one that matters,",
-] as const;
+const FIRST_STEP = ["Top of the list,", "First thing,", "First up,"] as const;
 const MIDDLE_STEPS = ["After that,", "Then,", "Next,", "Also,"] as const;
-const LAST_STEP = ["And last,", "And finally,", "Last one,"] as const;
+const LAST_STEP = ["And last,", "And finally,", "And then,"] as const;
+const SECOND_OF_TWO = ["And then,", "After that,", "Then,"] as const;
 
 const PRIORITY_LEAD_IN = [
   "Here's what wants you today.",
   "A few things need you.",
   "This is what I'd look at first.",
 ] as const;
-const SCHEDULE_LEAD_IN = ["As for the day itself,", "On your schedule,", "Day-wise,"] as const;
-const MARKETS_LEAD_IN = ["On the markets,", "Markets, briefly:", "Where the numbers are,"] as const;
+const SCHEDULE_LEAD_IN = ["As for the day itself,", "On your schedule,", "For the rest of the day,"] as const;
+const MARKETS_LEAD_IN = ["On the markets,", "Markets, briefly:", "Quick look at the markets:"] as const;
 const SITUATION_LEAD_IN = [
-  "Stepping back for a moment.",
-  "The wider picture.",
-  "Here's the context around it.",
+  "A bit of wider context.",
+  "The bigger picture:",
+  "Some background worth having.",
 ] as const;
-const NEWS_LEAD_IN = ["In the headlines,", "On the news,", "Worth knowing,"] as const;
+const NEWS_LEAD_IN = ["In the headlines,", "In the news,", "Worth knowing,"] as const;
 const SIGN_OFF = ["That's everything.", "That's the lot.", "That's your morning."] as const;
 
 export function briefToSpeech(brief: Brief | null | undefined): string {
@@ -212,26 +202,22 @@ export function briefToSpeech(brief: Brief | null | undefined): string {
         : i === 0
           ? `${pick(FIRST_STEP, seed, 2)} `
           : last
-            ? `${pick(LAST_STEP, seed, 3)} `
+            ? // "And last" only sounds right after a middle item.
+              priorities.length === 2
+              ? `${pick(SECOND_OF_TWO, seed, 3)} `
+              : `${pick(LAST_STEP, seed, 3)} `
             : `${pick(MIDDLE_STEPS, seed, i)} `;
 
     // The source is a small grey label on screen. Spoken, it has to be
     // part of a sentence or it lands as a stray word — hung off the
     // title with a dash where the title is a statement, and left as its
     // own short remark where it isn't, so a question keeps its mark.
-    const where = SOURCE_PHRASE[priority.source] ?? "";
     const isQuestion = /[?!]$/.test(speakableText(priority.title).trim());
-
     if (isQuestion) {
-      const asked = speakableText(priority.title).trim();
-      parts.push(`${lead}${asked}`);
-      if (where) parts.push(`That's ${where}.`);
-    } else if (where) {
-      parts.push(`${lead}${title} — ${where}.`);
+      parts.push(`${lead}${speakableText(priority.title).trim()}`);
     } else {
       parts.push(`${lead}${title}.`);
     }
-
     const reason = sentence(priority.reason ?? "");
     if (reason) parts.push(reason);
   });
@@ -294,22 +280,17 @@ export function briefToSpeech(brief: Brief | null | undefined): string {
     // blocks where one sentence was meant. Titles are copied exactly,
     // capital letters mid-sentence and all: a synthesiser doesn't
     // pronounce case, and lowercasing mangles names and tickers.
-    const clauses = highlights.map((item) => {
+    // "Reuters reports: Fed holds rates steady" is how a headline is
+    // said out loud. The earlier "Fed holds rates steady, from Reuters on
+    // markets" read like a database row. Titles stay verbatim — a
+    // paraphrased headline is a misquote.
+    highlights.forEach((item, i) => {
       const title = clause(item.title);
-      const category = NEWS_CATEGORY_PHRASE[item.category];
-      const attribution = item.source
-        ? `${item.source}${category ? ` on ${category}` : ""}`
-        : category
-          ? `on ${category}`
-          : "";
-      return attribution ? `${title}, from ${attribution}` : title;
-    });
-    clauses.forEach((line, i) => {
-      if (i === 0) {
-        parts.push(`${pick(NEWS_LEAD_IN, seed, 7)} ${line}.`);
-      } else {
-        parts.push(`${pick(NEWS_CONNECTORS, seed, i)} ${line}.`);
-      }
+      const said = item.source ? `${item.source} reports: ${title}` : title;
+      const lead =
+        i === 0 ? pick(NEWS_LEAD_IN, seed, 7) : pick(NEWS_CONNECTORS, seed, i);
+      const joiner = i === 0 && !item.source ? ":" : "";
+      parts.push(`${lead}${joiner} ${said}.`);
     });
   } else if (brief.newsUnavailable === "fetch_failed") {
     parts.push("The news feeds couldn't be reached this morning.");

@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { synthesizeSpeech, speechProvider, MAX_SPEECH_CHARS } from "@/lib/tts";
+import {
+  synthesizeSpeech,
+  speechProvider,
+  MAX_SPEECH_CHARS,
+  OPENAI_VOICES,
+  DEFAULT_OPENAI_VOICE,
+  type SpeechPosition,
+} from "@/lib/tts";
 import { allowRequest, rateLimitedResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const POSITIONS = new Set<SpeechPosition>(["only", "first", "middle", "last"]);
 
 // Which engine is doing the talking. The settings page asks so it can say
 // whether the browser voice list below it is decorative (a hosted voice
@@ -15,7 +24,14 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const provider = speechProvider();
-  return NextResponse.json({ provider, hosted: provider !== null });
+  return NextResponse.json({
+    provider,
+    hosted: provider !== null,
+    // Only OpenAI's voices are choosable per user; an ElevenLabs voice is
+    // set once for the deployment with ELEVENLABS_VOICE_ID.
+    voices: provider === "openai" ? OPENAI_VOICES : [],
+    defaultVoice: provider === "openai" ? DEFAULT_OPENAI_VOICE : null,
+  });
 }
 
 // Speech for the client to play.
@@ -46,7 +62,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const text = (body as { text?: unknown } | null)?.text;
+  const { text, voice, position } = (body ?? {}) as {
+    text?: unknown;
+    voice?: unknown;
+    position?: unknown;
+  };
   if (typeof text !== "string" || !text.trim()) {
     return NextResponse.json({ error: "Nothing to say." }, { status: 400 });
   }
@@ -55,7 +75,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const speech = await synthesizeSpeech(text);
+    const speech = await synthesizeSpeech(text, {
+      voice: typeof voice === "string" ? voice : null,
+      position: POSITIONS.has(position as SpeechPosition)
+        ? (position as SpeechPosition)
+        : "only",
+    });
     if (!speech) {
       return NextResponse.json(
         { error: "No speech provider configured.", code: "no_provider" },

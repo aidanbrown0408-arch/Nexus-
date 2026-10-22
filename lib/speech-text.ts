@@ -180,6 +180,13 @@ export function speakableText(input: unknown): string {
 export const FIRST_CHUNK_CHARS = 220;
 /** Later chunks are fetched during playback, so they trade latency for seams. */
 export const CHUNK_CHARS = 600;
+/**
+ * Later chunks for a hosted voice. Every seam restarts the voice's
+ * intonation, and fewer seams is most of what makes a long read sound
+ * like one person talking. The browser voice keeps CHUNK_CHARS: Chrome
+ * cuts off a single utterance that runs past about fifteen seconds.
+ */
+export const HOSTED_CHUNK_CHARS = 1000;
 
 const SENTENCE_END = /(?<=[.!?])\s+/;
 // Where to cut a sentence that is longer than a whole chunk on its own.

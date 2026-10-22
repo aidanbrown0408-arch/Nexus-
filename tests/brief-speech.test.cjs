@@ -48,7 +48,7 @@ test("does not simply read the card back", () => {
   assert.doesNotMatch(spoken, /(^|\.\s)(Markets|Headlines|Schedule)\.\s/);
 });
 
-test("walks the priorities in order and names where each came from", () => {
+test("walks the priorities in order without citing the inbox each time", () => {
   const spoken = briefToSpeech({
     ...base,
     priorities: [
@@ -71,9 +71,9 @@ test("walks the priorities in order and names where each came from", () => {
     assert.ok(spoken.includes(text), `missing: ${text}`);
   }
 
-  assert.match(spoken, /from your email/);
-  assert.match(spoken, /from your calendar/);
-  assert.match(spoken, /from your email and your calendar/);
+  // "— from your email" after every item is what made it sound like a
+  // machine reading a table. The card shows the source; the voice doesn't.
+  assert.doesNotMatch(spoken, /from your (email|calendar)/);
 
   // Spoken order matches the card's order.
   assert.ok(spoken.indexOf("Reply to Sarah") < spoken.indexOf("Book the flights"));
@@ -87,7 +87,7 @@ test("doesn't count off a list of one", () => {
       { title: "Reply to Sarah", reason: "She asked yesterday.", source: "email" },
     ],
   });
-  assert.match(spoken, /Reply to Sarah — from your email\./);
+  assert.match(spoken, /Reply to Sarah\. She asked yesterday\./);
   assert.doesNotMatch(spoken, /Top of the list|First thing|And last/);
 });
 
@@ -98,7 +98,7 @@ test("keeps a question mark instead of swallowing it into the source", () => {
       { title: "Did the vendor ever reply?", reason: "No answer since Monday.", source: "email" },
     ],
   });
-  assert.match(spoken, /Did the vendor ever reply\? That's from your email\./);
+  assert.match(spoken, /Did the vendor ever reply\? No answer since Monday\./);
 });
 
 test("speaks market quotes as words, not symbols", () => {
@@ -143,8 +143,8 @@ test("reads the situation paragraphs and the headlines with their source", () =>
   });
   assert.match(spoken, /Markets rose\. Talks continued in Vienna\./);
   // Titles copied exactly — a paraphrased headline is a misquote.
-  assert.match(spoken, /Fed holds rates steady, from Reuters on markets/);
-  assert.match(spoken, /Port strike enters a second week, from AP on U\.S\./);
+  assert.match(spoken, /Reuters reports: Fed holds rates steady\./);
+  assert.match(spoken, /AP reports: Port strike enters a second week\./);
   // A URL read character by character is the thing this whole module exists to avoid.
   assert.doesNotMatch(spoken, /example\.com|https/);
 });
